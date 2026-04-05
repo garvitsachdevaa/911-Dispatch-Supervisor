@@ -63,7 +63,7 @@ def test_reset() -> None:
     print("Testing /reset endpoint...")
     response = requests.post(
         f"{HOST}/reset",
-        json={"task_id": "arrival", "seed": 42},
+        json={"task_id": "single_incident", "seed": 42},
         timeout=10,
     )
     assert response.status_code == 200, f"Expected 200, got {response.status_code}"

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Demo script showing the 911 dispatch supervisor environment in action.
 
-This non-interactive demo runs a deterministic episode using OpenEnvEnvironment
-directly (no LLM/API server required). It performs a scripted triage sequence
-on the multi-incident task.
+This non-interactive demo runs an episode using OpenEnvEnvironment directly
+(no LLM/API server required). It uses `legal_actions()` so it is seed/task
+independent.
 """
 
 import asyncio
@@ -47,14 +47,12 @@ async def run_demo_episode(
         rewards = []
         errors = []
 
-        scripted_actions = [
-            Action(action_type=DispatchAction.DISPATCH, unit_id="MED-1", incident_id="INC-002"),
-            Action(action_type=DispatchAction.DISPATCH, unit_id="ENG-1", incident_id="INC-001"),
-            Action(action_type=DispatchAction.DISPATCH, unit_id="LAD-1", incident_id="INC-001"),
-            Action(action_type=DispatchAction.DISPATCH, unit_id="PAT-1", incident_id="INC-003"),
-        ]
-
-        for action in scripted_actions:
+        # Step through the environment using only legal actions.
+        while step_count < max_steps:
+            legal = env.legal_actions()
+            if not legal:
+                break
+            action = legal[0]
             step_count += 1
             try:
                 obs, reward, done = await env.step(action)
@@ -73,19 +71,6 @@ async def run_demo_episode(
                 print(f"[STEP {step_count}] ERROR: {e}")
                 break
 
-        # Continue stepping with any legal actions until done/max_steps.
-        while step_count < max_steps:
-            legal = env.legal_actions()
-            if not legal:
-                break
-            action = legal[0]
-            step_count += 1
-            obs, reward, done = await env.step(action)
-            rewards.append(reward)
-            total_reward += reward
-            if done:
-                break
-
         # Final state
         final_state = env.state()
 
@@ -101,6 +86,15 @@ async def run_demo_episode(
         print(f"Total Reward:  {total_reward:.4f}")
         print(f"Final Score:   {final_score:.4f}")
         print(f"Active incidents: {sum(1 for i in final_state.incidents.values() if i.status.value != 'RESOLVED')}")
+
+        print("\n" + "─" * 60)
+        print(f"{'Incident':<12} {'Type':<22} {'Severity':<12} {'Status':<12}")
+        print("─" * 60)
+        for inc in sorted(final_state.incidents.values(), key=lambda i: i.incident_id):
+            print(
+                f"{inc.incident_id:<12} {inc.incident_type.value:<22} {inc.severity.value:<12} {inc.status.value:<12}"
+            )
+        print("─" * 60)
 
         if errors:
             print(f"\nErrors encountered: {len(errors)}")

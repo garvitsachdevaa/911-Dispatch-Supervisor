@@ -48,6 +48,22 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/tasks")
+async def list_tasks() -> list[dict[str, str]]:
+    """List all available tasks."""
+    from src.tasks.registry import TaskRegistry
+
+    return [
+        {
+            "task_id": t.task_id,
+            "name": t.name,
+            "description": t.description,
+            "difficulty": t.difficulty,
+        }
+        for t in TaskRegistry.list_tasks()
+    ]
+
+
 @app.post("/reset")
 async def reset(request: ResetRequest) -> dict[str, Any]:
     global _env

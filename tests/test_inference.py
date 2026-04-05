@@ -9,7 +9,7 @@ import sys
 
 
 class TestInferenceFormatCompliance:
-    TASK_IDS = ["single_incident", "multi_incident", "mass_casualty"]
+    TASK_IDS = ["single_incident", "multi_incident", "mass_casualty", "shift_surge"]
 
     def _run_inference_capture(self, env: dict[str, str]) -> tuple[int, str, str]:
         cmd = [sys.executable, "inference.py"]

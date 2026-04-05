@@ -6,6 +6,7 @@ COPY src/server/requirements.txt .
 RUN pip install -r requirements.txt
 
 COPY src/ /app/src/
+COPY data/ /app/data/
 
 EXPOSE 8000
 

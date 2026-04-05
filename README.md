@@ -1,3 +1,17 @@
+---
+title: 911 Dispatch Supervisor
+emoji: 🚨
+colorFrom: red
+colorTo: orange
+sdk: docker
+pinned: false
+tags:
+	- openenv
+	- reinforcement-learning
+	- llm-agent
+	- emergency-dispatch
+---
+
 # 911 City-Wide Emergency Dispatch Supervisor
 
 **LLM-powered 911 dispatch supervision — city scale**
@@ -105,6 +119,33 @@ python demo.py
 # Run inference
 python inference.py
 ```
+
+## Reward Function
+
+The reward signal is a weighted combination of five components:
+
+| Component | Weight | Description |
+|-----------|--------|-------------|
+| `response_time` | 30% | How quickly units reach incidents relative to severity benchmarks |
+| `triage` | 25% | Whether the dispatched unit type matches incident requirements |
+| `survival` | 25% | Whether Priority-1 incidents are resolved before survival clock expires |
+| `coverage` | 12% | Geographic distribution of available units across city districts |
+| `protocol` | 8% | Whether the dispatch action was legally valid |
+
+**Safety gate:** If any Priority-1 incident was seen and `survival=0.0`, the total episode score is capped at `0.2` regardless of other components.
+
+## Baseline Scores
+
+Scores from the random baseline agent (`USE_RANDOM=true`):
+
+| Task | Difficulty | Baseline Score |
+|------|-----------|---------------|
+| `single_incident` | Easy | ~0.55 |
+| `multi_incident` | Medium | ~0.48 |
+| `mass_casualty` | Hard | ~0.32 |
+| `shift_surge` | Hard | ~0.38 |
+
+*Run `USE_RANDOM=true python inference.py` to reproduce.*
 
 ## Project Structure
 

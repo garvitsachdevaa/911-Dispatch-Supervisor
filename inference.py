@@ -304,7 +304,7 @@ async def main() -> int:
             hf_token = os.environ.get("HF_TOKEN", "")
             agent = LLMAgent(api_key=hf_token, base_url=api_base_url, model=model_name)
 
-        task_ids = ["single_incident", "multi_incident", "mass_casualty"]
+        task_ids = ["single_incident", "multi_incident", "mass_casualty", "shift_surge"]
 
         for task_id in task_ids:
             await run_episode(task_id, model_name, agent)

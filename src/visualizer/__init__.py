@@ -1,1 +1,1 @@
-"""Visualizer package for 2D airport state viewer."""
+"""Visualizer package for 2D city dispatch state viewer."""
