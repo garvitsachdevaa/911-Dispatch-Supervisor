@@ -19,6 +19,7 @@ from src.models import (
     UnitStatus,
 )
 from src.protocol import DispatchProtocolValidator
+from src.rewards import RewardCalculator
 from src.tasks.registry import DispatchScenarioFactory
 
 DEFAULT_DT_S = 30.0
@@ -57,6 +58,7 @@ class DispatchStateMachine:
         self._seed = seed
         self._rng = random.Random(seed)
         self._validator = DispatchProtocolValidator()
+        self._rewards = RewardCalculator()
         self._incident_counter = 0
 
     def reset(self, task_id: str, episode_id: str) -> State:
@@ -140,6 +142,13 @@ class DispatchStateMachine:
         validation = self._validator.validate(self._schema, state, action)
         if not validation.ok:
             state = self._tick(state)
+            breakdown = {
+                "response_time": 0.0,
+                "triage": 0.0,
+                "survival": 0.0,
+                "coverage": 0.0,
+                "protocol": 0.0,
+            }
             return (
                 state,
                 Observation(
@@ -147,6 +156,7 @@ class DispatchStateMachine:
                     score=0.0,
                     protocol_ok=False,
                     issues=validation.issues,
+                    reward_breakdown=breakdown,
                 ),
             )
 
@@ -157,20 +167,16 @@ class DispatchStateMachine:
 
         state = self._tick(state)
 
-        # Simple shaping: valid action gets a strong score, resolving gets max.
-        score = 0.8
-        if any(i.status == IncidentStatus.RESOLVED for i in state.incidents.values()):
-            score = 1.0
-
-        return (
-            state,
-            Observation(
-                result="ok",
-                score=score,
-                protocol_ok=True,
-                issues=[],
-            ),
+        obs = Observation(
+            result="ok",
+            score=0.0,
+            protocol_ok=True,
+            issues=validation.issues,
         )
+        signal, total = self._rewards.compute_reward(state, action, obs)
+        obs = obs.model_copy(update={"score": total, "reward_breakdown": signal.model_dump()})
+
+        return (state, obs)
 
     def is_terminal(self, state: State) -> bool:
         max_steps = int(state.metadata.get("max_steps", MAX_STEPS))

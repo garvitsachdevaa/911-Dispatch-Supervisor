@@ -93,11 +93,13 @@ async def get_dashboard_state() -> dict[str, Any]:
     legal_actions = [a.model_dump() for a in _env.legal_actions()]
     last_obs = _env.last_observation()
     issues = list(last_obs.issues) if last_obs is not None else []
+    obs_dict = last_obs.model_dump() if last_obs is not None else None
 
     return {
         **state_dict,
         "legal_actions": legal_actions,
         "issues": issues,
+        "observation": obs_dict,
     }
 
 

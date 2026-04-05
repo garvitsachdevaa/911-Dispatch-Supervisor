@@ -1,3 +1,17 @@
 name: citywide-dispatch-supervisor
 version: "0.1.0"
 description: 911 dispatch supervisor RL environment powered by LLM orchestration.
+entrypoint: src.openenv_environment:OpenEnvEnvironment
+tasks:
+	- id: single_incident
+		name: Single Incident
+		description: One incident with a small unit pool; learn basic dispatch.
+	- id: multi_incident
+		name: Multi Incident
+		description: Multiple concurrent incidents; triage and prioritization under constraints.
+	- id: mass_casualty
+		name: Mass Casualty
+		description: Priority-1 surge; maximize survival and response time.
+	- id: shift_surge
+		name: Shift Surge
+		description: Incident waves plus unit status changes; maintain coverage over time.

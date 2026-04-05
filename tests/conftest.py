@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for ATC Ground Control test suite."""
+"""Shared pytest fixtures for 911 dispatch supervisor test suite."""
 
 from __future__ import annotations
 
@@ -7,18 +7,15 @@ from typing import Any
 
 import pytest
 
-from src.airport_schema import (
-    AirportEdge,
-    AirportNode,
-    AirportSchema,
-    EdgeMovement,
-    NodeType,
-)
+from src.city_schema import CitySchema
 from src.models import (
     Action,
-    AircraftState,
-    ClearanceType,
-    LifecyclePhase,
+    DispatchAction,
+    IncidentSeverity,
+    IncidentStatus,
+    IncidentType,
+    UnitStatus,
+    UnitType,
 )
 
 
@@ -29,85 +26,62 @@ def seeded_random() -> random.Random:
 
 
 @pytest.fixture
-def sample_aircraft_state() -> dict[str, Any]:
-    """Return a minimal valid AircraftState dict."""
+def sample_unit_state() -> dict[str, Any]:
+    """Return a minimal valid UnitState dict."""
     return {
-        "callsign": "BAW123",
-        "x_ft": 0.0,
-        "y_ft": 0.0,
-        "heading_deg": 90.0,
-        "altitude_ft": 0.0,
-        "speed_kt": 0.0,
-        "phase": LifecyclePhase.ARRIVAL_HANDOFF,
-        "assigned_runway": None,
-        "assigned_gate": None,
-        "wake_category": "M",
+        "unit_id": "MED-1",
+        "unit_type": UnitType.MEDIC,
+        "status": UnitStatus.AVAILABLE,
+        "location_x": 10.0,
+        "location_y": 10.0,
+        "assigned_incident_id": None,
+        "eta_seconds": 0.0,
+        "crew_count": 2,
+    }
+
+
+@pytest.fixture
+def sample_incident_state() -> dict[str, Any]:
+    """Return a minimal valid IncidentState dict."""
+    return {
+        "incident_id": "INC-001",
+        "incident_type": IncidentType.CARDIAC_ARREST,
+        "severity": IncidentSeverity.PRIORITY_1,
+        "location_x": 12.0,
+        "location_y": 14.0,
+        "reported_at_step": 0,
+        "units_assigned": [],
+        "status": IncidentStatus.PENDING,
+        "survival_clock": 240.0,
     }
 
 
 @pytest.fixture
 def sample_action() -> dict[str, Any]:
-    """Return a minimal valid Action dict."""
+    """Return a minimal valid dispatch Action dict."""
     return {
-        "clearance_type": ClearanceType.TAXI,
-        "target_callsign": "BAW123",
-        "route": [],
-        "readback_required": False,
-        "pushback_direction": None,
-        "hold_short": False,
-        "runway": None,
+        "action_type": DispatchAction.DISPATCH,
+        "unit_id": "MED-1",
+        "incident_id": "INC-001",
+        "notes": None,
+        "priority_override": None,
     }
 
 
 @pytest.fixture
-def gatwick_schema() -> AirportSchema:
-    """Return a minimal valid Gatwick AirportSchema instance."""
-    return AirportSchema(
-        airport_code="EGKK",
-        nodes={
-            "stand_1": AirportNode(
-                id="stand_1",
-                node_type=NodeType.STAND,
-                x_ft=0.0,
-                y_ft=0.0,
-            )
+def metro_city_schema() -> CitySchema:
+    """Return a minimal valid CitySchema instance."""
+    return CitySchema(
+        city_name="Metro City",
+        grid_size=[100, 100],
+        districts=["downtown", "northside"],
+        units=[],
+        unit_speeds={
+            UnitType.MEDIC: 1.0,
+            UnitType.ENGINE: 0.8,
         },
-        edges=[
-            AirportEdge(
-                from_node="stand_1",
-                to_node="stand_1",
-                movement_type=EdgeMovement.TAXI,
-                distance_ft=100.0,
-                max_speed_kt=20.0,
-            )
-        ],
-        runways=[],
-        gates=[],
-    )
-
-
-@pytest.fixture
-def dummy_schema() -> AirportSchema:
-    """Return a minimal valid dummy AirportSchema instance."""
-    return AirportSchema(
-        airport_code="DUMMY",
-        nodes={
-            "stand_1": AirportNode(
-                id="stand_1",
-                node_type=NodeType.STAND,
-                x_ft=0.0,
-                y_ft=0.0,
-            )
+        default_required_units={
+            IncidentType.CARDIAC_ARREST: [UnitType.MEDIC],
+            IncidentType.STRUCTURE_FIRE: [UnitType.ENGINE],
         },
-        edges=[
-            AirportEdge(
-                from_node="stand_1",
-                to_node="stand_1",
-                movement_type=EdgeMovement.TAXI,
-                distance_ft=100.0,
-                max_speed_kt=20.0,
-            )
-        ],
-        runways=[],
-        gates=[],
     )

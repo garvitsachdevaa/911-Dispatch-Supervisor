@@ -78,6 +78,7 @@ class Observation(BaseModel):
     score: float = Field(..., ge=0.0, le=1.0)
     protocol_ok: bool = False
     issues: list[str] = Field(default_factory=list)
+    reward_breakdown: dict[str, float] | None = None
 
 
 class UnitState(BaseModel):

@@ -1,112 +1,24 @@
 #!/usr/bin/env python3
-"""Demo script showing the ATC Ground Control environment in action.
+"""Demo script showing the 911 dispatch supervisor environment in action.
 
-This non-interactive demo runs a deterministic episode using the OpenEnvEnvironment
-directly, without requiring an LLM or API server. It demonstrates the full
-arrival lifecycle: approach → landing → handoff → taxi-in → docking.
-
-Usage:
-    uv run python demo.py
+This non-interactive demo runs a deterministic episode using OpenEnvEnvironment
+directly (no LLM/API server required). It performs a scripted triage sequence
+on the multi-incident task.
 """
 
 import asyncio
 import sys
 
-from src.models import Action, ClearanceType
+from src.models import Action, DispatchAction
 from src.openenv_environment import OpenEnvEnvironment
 
 
-def get_legal_action_for_phase(env: OpenEnvEnvironment) -> Action | None:
-    """Get a legal action for the current environment phase.
-
-    Args:
-        env: The OpenEnv environment instance.
-
-    Returns:
-        A legal Action for the current phase, or None if no action is available.
-    """
-    from src.state_machine import FullLifecycleStateMachine
-
-    state = env.state()
-    aircraft = list(state.aircraft.values())[0] if state.aircraft else None
-    if not aircraft:
-        return None
-
-    # Get legal actions from the state machine's internal logic
-    # We'll use a simple strategy based on the current phase
-    phase = state.phase
-
-    if phase.value == "approach":
-        return Action(
-            clearance_type=ClearanceType.LANDING,
-            target_callsign=aircraft.callsign,
-            runway="27L",
-        )
-    elif phase.value == "landing":
-        return Action(
-            clearance_type=ClearanceType.LANDING,
-            target_callsign=aircraft.callsign,
-            runway="27L",
-        )
-    elif phase.value == "arrival_handoff":
-        return Action(
-            clearance_type=ClearanceType.TAXI,
-            target_callsign=aircraft.callsign,
-            route=["TAXIWAY_C", "TAXIWAY_D", "GATE_B2"],
-        )
-    elif phase.value == "taxi_in":
-        return Action(
-            clearance_type=ClearanceType.TAXI,
-            target_callsign=aircraft.callsign,
-            route=["GATE_B2"],
-        )
-    elif phase.value == "at_gate":
-        return Action(
-            clearance_type=ClearanceType.PUSHBACK,
-            target_callsign=aircraft.callsign,
-            pushback_direction="back",
-        )
-    elif phase.value == "pushback":
-        return Action(
-            clearance_type=ClearanceType.PUSHBACK,
-            target_callsign=aircraft.callsign,
-            pushback_direction="back",
-        )
-    elif phase.value == "taxi_out":
-        return Action(
-            clearance_type=ClearanceType.TAXI,
-            target_callsign=aircraft.callsign,
-            route=["DEPARTURE_QUEUE"],
-        )
-    elif phase.value == "departure_queue":
-        return Action(
-            clearance_type=ClearanceType.LINE_UP,
-            target_callsign=aircraft.callsign,
-        )
-    elif phase.value == "takeoff":
-        return Action(
-            clearance_type=ClearanceType.TAKEOFF,
-            target_callsign=aircraft.callsign,
-        )
-
-    return None
-
-
 async def run_demo_episode(
-    seed: int = 42, task_id: str = "arrival", max_steps: int = 300
+    seed: int = 42, task_id: str = "multi_incident", max_steps: int = 120
 ) -> dict:
-    """Run a deterministic demo episode.
-
-    Args:
-        seed: Random seed for deterministic behavior.
-        task_id: Task identifier (arrival, departure, integrated).
-        max_steps: Maximum number of steps before forcing termination.
-
-    Returns:
-        Dictionary containing episode summary information.
-    """
+    """Run a deterministic demo episode."""
     print("=" * 60)
-    print("ATC GROUND CONTROL - DEMO EPISODE")
+    print("911 DISPATCH SUPERVISOR - DEMO EPISODE")
     print("=" * 60)
     print(f"Task: {task_id}")
     print(f"Seed: {seed}")
@@ -121,80 +33,57 @@ async def run_demo_episode(
         state = env.state()
 
         print(f"Episode ID: {state.episode_id}")
-        print(f"Initial Phase: {state.phase.value}")
-        print(
-            f"Aircraft: {list(state.aircraft.values())[0].callsign if state.aircraft else 'None'}"
-        )
+        print(f"Initial incidents: {len(state.incidents)}")
+        print(f"Initial units: {len(state.units)}")
+        for inc in sorted(state.incidents.values(), key=lambda i: i.incident_id):
+            print(
+                f"  - {inc.incident_id}: {inc.incident_type.value} {inc.severity.value} ({inc.status.value})"
+            )
         print("-" * 60)
 
         # Track episode progress
-        phases_completed = []
         step_count = 0
         total_reward = 0.0
         rewards = []
         errors = []
 
-        # Run episode
-        while step_count < max_steps:
+        scripted_actions = [
+            Action(action_type=DispatchAction.DISPATCH, unit_id="MED-1", incident_id="INC-002"),
+            Action(action_type=DispatchAction.DISPATCH, unit_id="ENG-1", incident_id="INC-001"),
+            Action(action_type=DispatchAction.DISPATCH, unit_id="LAD-1", incident_id="INC-001"),
+            Action(action_type=DispatchAction.DISPATCH, unit_id="PAT-1", incident_id="INC-003"),
+        ]
+
+        for action in scripted_actions:
             step_count += 1
-
-            # Get current state
-            current_state = env.state()
-
-            # Get legal action for current phase
-            action = get_legal_action_for_phase(env)
-
-            if action is None:
-                # No action available - check if terminal
-                if current_state.phase.value == "departed":
-                    print(
-                        f"\n[STEP {step_count}] Episode complete (natural termination)"
-                    )
-                    break
-                else:
-                    # Try to advance with a default action
-                    aircraft = (
-                        list(current_state.aircraft.values())[0]
-                        if current_state.aircraft
-                        else None
-                    )
-                    if aircraft:
-                        action = Action(
-                            clearance_type=ClearanceType.TAXI,
-                            target_callsign=aircraft.callsign,
-                            route=[],
-                        )
-                    else:
-                        errors.append(f"Step {step_count}: No aircraft found")
-                        break
-
-            # Execute step
             try:
                 obs, reward, done = await env.step(action)
                 rewards.append(reward)
                 total_reward += reward
 
-                print(f"[STEP {step_count}] Phase: {current_state.phase.value}")
                 print(
-                    f"         Action: {action.clearance_type.value} -> {action.target_callsign}"
+                    f"[STEP {step_count}] Action: {action.action_type.value} {action.unit_id}->{action.incident_id} "
+                    f"Reward: {reward:.4f} Done: {done} Issues: {obs.issues}"
                 )
-                print(f"         Reward: {reward:.4f} | Done: {done}")
-
-                # Track phase completions
-                new_state = env.state()
-                if new_state.phase != current_state.phase:
-                    phases_completed.append(current_state.phase.value)
-                    print(
-                        f"         *** PHASE COMPLETE: {current_state.phase.value} ***"
-                    )
 
                 if done:
-                    print(f"\n[STEP {step_count}] Episode terminated")
                     break
-
             except Exception as e:
                 errors.append(f"Step {step_count}: {str(e)}")
                 print(f"[STEP {step_count}] ERROR: {e}")
+                break
+
+        # Continue stepping with any legal actions until done/max_steps.
+        while step_count < max_steps:
+            legal = env.legal_actions()
+            if not legal:
+                break
+            action = legal[0]
+            step_count += 1
+            obs, reward, done = await env.step(action)
+            rewards.append(reward)
+            total_reward += reward
+            if done:
                 break
 
         # Final state
@@ -208,13 +97,10 @@ async def run_demo_episode(
         print("-" * 60)
         print(f"Task ID:       {task_id}")
         print(f"Episode ID:    {final_state.episode_id}")
-        print(f"Final Phase:   {final_state.phase.value}")
         print(f"Steps Taken:   {step_count}")
         print(f"Total Reward:  {total_reward:.4f}")
         print(f"Final Score:   {final_score:.4f}")
-        print(f"Phases Completed: {len(phases_completed)}")
-        for i, phase in enumerate(phases_completed, 1):
-            print(f"  {i}. {phase}")
+        print(f"Active incidents: {sum(1 for i in final_state.incidents.values() if i.status.value != 'RESOLVED')}")
 
         if errors:
             print(f"\nErrors encountered: {len(errors)}")
@@ -228,11 +114,9 @@ async def run_demo_episode(
         return {
             "task_id": task_id,
             "episode_id": final_state.episode_id,
-            "final_phase": final_state.phase.value,
             "steps": step_count,
             "total_reward": total_reward,
             "final_score": final_score,
-            "phases_completed": phases_completed,
             "errors": errors,
         }
 
@@ -244,14 +128,14 @@ def main() -> int:
     """Main entry point for demo script."""
     print("\n")
     print("╔══════════════════════════════════════════════════════════════╗")
-    print("║     GRADIENT ASCENT - ATC GROUND CONTROL DEMO               ║")
-    print("║     LLM-powered airport ground control — full lifecycle      ║")
+    print("║     911 DISPATCH SUPERVISOR DEMO                            ║")
+    print("║     City-wide emergency dispatch RL environment              ║")
     print("╚══════════════════════════════════════════════════════════════╝")
     print("\n")
 
     try:
         result = asyncio.run(
-            run_demo_episode(seed=42, task_id="arrival", max_steps=300)
+            run_demo_episode(seed=42, task_id="multi_incident", max_steps=120)
         )
 
         print("\n[SUCCESS] Demo episode completed successfully!")

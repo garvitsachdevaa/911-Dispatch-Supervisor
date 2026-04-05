@@ -19,11 +19,19 @@ class OpenEnvEnvironment:
     async def reset(self) -> Observation:
         episode_id = str(uuid.uuid4())
         self._state = self._machine.reset(task_id=self.task_id, episode_id=episode_id)
+        self._state.metadata["cumulative_reward"] = 0.0
         self._last_observation = Observation(
             result="dispatch center online",
             score=0.0,
             protocol_ok=True,
             issues=[],
+            reward_breakdown={
+                "response_time": 0.0,
+                "triage": 0.0,
+                "survival": 0.0,
+                "coverage": 0.0,
+                "protocol": 1.0,
+            },
         )
         return self._last_observation
 
@@ -33,6 +41,9 @@ class OpenEnvEnvironment:
         state, obs = self._machine.step(self._state, action)
         self._state = state
         self._last_observation = obs
+        cumulative = float(self._state.metadata.get("cumulative_reward", 0.0))
+        cumulative += float(obs.score)
+        self._state.metadata["cumulative_reward"] = cumulative
         done = self._machine.is_terminal(state)
         return obs, obs.score, done
 

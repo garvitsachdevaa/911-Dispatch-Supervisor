@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pre-submit local validation script for ATC Ground Control RL Environment."""
+"""Pre-submit local validation script for 911 Dispatch Supervisor RL Environment."""
 
 from __future__ import annotations
 

@@ -1,43 +1,74 @@
 # 911 City-Wide Emergency Dispatch Supervisor
 
-**LLM-powered airport ground control — full lifecycle**
+**LLM-powered 911 dispatch supervision — city scale**
 
-A unified RL training environment for airport ground control operations, powered by LLM orchestration. Manages the complete aircraft lifecycle from approach to departure, including landing, handoff, taxiing, docking, pushback, and takeoff sequencing.
+A unified RL training environment for city-wide emergency dispatch operations. The agent supervises police, fire, and EMS unit allocation across simultaneous incidents under a deterministic simulation.
 
 ## Overview
 
-This project implements a competition-ready benchmark environment for training and evaluating LLM agents in airport ground control operations. It features:
+This project implements a benchmark environment for training and evaluating LLM agents as emergency dispatch supervisors. It features:
 
-- **Full lifecycle coverage**: 11 distinct phases from approach to departure
+- **Dispatch lifecycle**: incidents advance from pending to resolved (or escalated)
 - **Deterministic simulation**: Reproducible episodes under fixed seeds
-- **Normalized hybrid ATC protocol**: Airport-agnostic communication procedures
+- **Protocol validator**: Checks if actions are legal in the current state
 - **OpenEnv compatible**: Standard RL environment interface
-- **Read-only 2D visualizer**: Synchronized state visualization
+- **Read-only 2D visualization**: Synchronized unit/incident visualization
 
 ## Tasks
 
-### 1. Arrival Task (Hard)
+### 1. `single_incident`
 
-Complete inbound aircraft lifecycle:
-- Landing clearance and runway operations
-- Tower-to-ground frequency handoff
-- Taxi-in to assigned gate
-- Safe docking
+One active incident and a small unit pool. Focus: basic dispatch, response-time, and protocol correctness.
 
-### 2. Departure Task (Easy)
+### 2. `multi_incident`
 
-Complete outbound aircraft lifecycle:
-- Pushback approval from gate
-- Taxi-out via taxiway network
-- Departure queue management
-- Runway release and takeoff clearance
+Multiple concurrent incidents with limited resources. Focus: triage and prioritization.
 
-### 3. Integrated Task (Medium)
+### 3. `mass_casualty`
 
-Full turnaround lifecycle:
-- Complete arrival sequence (landing → docking)
-- Turnaround operations
-- Complete departure sequence (pushback → departure)
+High severity surge (Priority-1 heavy). Focus: survival outcomes and rapid allocation.
+
+### 4. `shift_surge`
+
+Longer horizon with incident waves and unit availability changes. Focus: coverage and strategic staging.
+
+## Contracts
+
+### Action
+
+`src.models.Action` fields:
+
+| Field | Type | Notes |
+|------|------|-------|
+| `action_type` | `DispatchAction` | e.g. `DISPATCH`, `CANCEL`, `UPGRADE`, `MUTUAL_AID` |
+| `unit_id` | `str` | Unit identifier, e.g. `MED-1` |
+| `incident_id` | `str` | Incident identifier, e.g. `INC-0001` |
+| `notes` | `str \| None` | Optional free text |
+| `priority_override` | `IncidentSeverity \| None` | Required for upgrade/downgrade |
+
+### Observation
+
+`src.models.Observation` fields:
+
+| Field | Type | Notes |
+|------|------|-------|
+| `result` | `str` | Human-readable result |
+| `score` | `float` | Step reward in `[0,1]` |
+| `protocol_ok` | `bool` | Whether action was legal |
+| `issues` | `list[str]` | Warnings/errors from protocol validator |
+| `reward_breakdown` | `dict[str,float] \| None` | Component scores for dashboard |
+
+## Reward
+
+The reward is a weighted combination of:
+
+- `response_time`
+- `triage`
+- `survival`
+- `coverage`
+- `protocol`
+
+See `src/rewards.py` for the component definitions and weights.
 
 ## Quick Start
 
@@ -52,6 +83,14 @@ uv run python demo.py
 
 # Run inference with LLM agent
 uv run python inference.py
+
+# Run API server
+uv run python -m src.server.app
+
+# Open live dashboard (static HTML)
+# - start the server first
+# - call /reset to initialize the environment
+# - then open live_dashboard.html in a browser
 ```
 
 ### Using pip
@@ -74,19 +113,20 @@ python inference.py
 ├── src/
 │   ├── __init__.py
 │   ├── models.py           # Pydantic typed contracts
-│   ├── protocol.py         # Normalized ATC protocol
-│   ├── physics.py          # Deterministic aircraft physics
-│   ├── airport_schema.py   # Airport topology
-│   ├── state_machine.py    # Full lifecycle state machine
+│   ├── protocol.py         # Dispatch protocol validator
+│   ├── physics.py          # City-grid movement/ETA helpers
+│   ├── city_schema.py      # City topology + unit configuration
+│   ├── state_machine.py    # Dispatch state machine
 │   ├── rewards.py          # Reward engine and graders
-│   ├── phraseology.py      # ATC phraseology judge
+│   ├── phraseology.py      # Dispatch phraseology judge
 │   ├── api.py              # REST API surface
 │   ├── openenv_environment.py  # OpenEnv wrapper
 │   ├── tasks/
 │   │   ├── registry.py     # Task registry
-│   │   ├── arrival.py      # Arrival task implementation
-│   │   ├── departure.py    # Departure task implementation
-│   │   └── integrated.py  # Integrated task implementation
+│   │   ├── single_incident.py
+│   │   ├── multi_incident.py
+│   │   ├── mass_casualty.py
+│   │   └── shift_surge.py
 │   ├── server/
 │   │   ├── app.py          # FastAPI server
 │   │   └── Dockerfile
@@ -119,7 +159,7 @@ docker run -p 8000:8000 citywide-dispatch-supervisor
 curl http://localhost:8000/health
 
 # Reset environment
-curl -X POST http://localhost:8000/reset -H "Content-Type: application/json" -d '{"task_id": "arrival", "seed": 42}'
+curl -X POST http://localhost:8000/reset -H "Content-Type: application/json" -d '{"task_id": "single_incident", "seed": 42}'
 ```
 
 ### Environment Variables
@@ -138,6 +178,7 @@ curl -X POST http://localhost:8000/reset -H "Content-Type: application/json" -d 
 | `/reset` | POST | Reset environment to initial state |
 | `/step` | POST | Execute an action |
 | `/state` | GET | Get current environment state |
+| `/dashboard/state` | GET | Extended state for `live_dashboard.html` |
 
 ## HF Space
 
