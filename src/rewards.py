@@ -103,12 +103,16 @@ class RewardCalculator:
             return 0.0
 
         required_map = state.metadata.get("default_required_units", {})
-        required_types = required_map.get(str(incident.incident_type), [])
+        # Try both formats: plain value and StrEnum repr
+        required_types = (
+            required_map.get(incident.incident_type.value, [])
+            or required_map.get(str(incident.incident_type), [])
+        )
         if not required_types:
             return 0.5
 
         # required_types are stored as strings in metadata.
-        if str(unit.unit_type) in set(required_types):
+        if unit.unit_type.value in set(required_types):
             return 1.0
         return 0.0
 

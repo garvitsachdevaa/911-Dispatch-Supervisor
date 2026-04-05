@@ -40,20 +40,27 @@ class MultiIncidentGrader:
         self.reward_calculator = RewardCalculator()
 
     def grade(self, state: State, rewards: list[float]) -> float:
+        """Grade based on: P1 incidents resolved, triage correctness, coverage."""
         if not rewards:
             return 0.0
 
-        mean_reward = sum(rewards) / len(rewards)
+        total = len(state.incidents)
+        if total == 0:
+            return 0.0
 
-        # Heuristic: reward triage if at least one MEDIC is assigned to the cardiac arrest.
-        cardiac = next((i for i in state.incidents.values() if i.incident_type == IncidentType.CARDIAC_ARREST), None)
-        if cardiac is None:
-            return max(0.0, min(1.0, mean_reward))
-
-        has_medic = any(
-            (u.unit_type == UnitType.MEDIC and u.assigned_incident_id == cardiac.incident_id)
-            for u in state.units.values()
+        resolved = sum(1 for i in state.incidents.values() if i.status.value == "RESOLVED")
+        failed = sum(1 for i in state.incidents.values() if i.status.value == "ESCALATED")
+        p1_total = sum(1 for i in state.incidents.values() if i.severity.value == "PRIORITY_1")
+        p1_resolved = sum(
+            1
+            for iid in state.metadata.get("resolved_incidents", [])
+            if state.incidents.get(iid)
+            and state.incidents[iid].severity.value == "PRIORITY_1"
         )
 
-        bonus = 0.1 if has_medic else 0.0
-        return max(0.0, min(1.0, mean_reward + bonus))
+        resolution_score = resolved / total
+        p1_score = (p1_resolved / p1_total) if p1_total > 0 else 1.0
+        failure_penalty = failed / total
+
+        score = 0.5 * p1_score + 0.3 * resolution_score - 0.2 * failure_penalty
+        return max(0.0, min(1.0, score))

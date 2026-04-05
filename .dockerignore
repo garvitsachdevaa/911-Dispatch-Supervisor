@@ -1,0 +1,17 @@
+.git
+.venv
+.uv
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.coverage
+htmlcov
+.sisyphus/evidence/
+*.log
+tmp/
+dashboard.html
+*.png
+*.jpg
+.env
+.env.*

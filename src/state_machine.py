@@ -78,9 +78,15 @@ class DispatchStateMachine:
         state.metadata.setdefault("districts", meta.get("districts", schema_dump.get("districts", [])))
         state.metadata.setdefault("grid_size", meta.get("grid_size", schema_dump.get("grid_size", [])))
         state.metadata.setdefault("unit_speeds", schema_dump.get("unit_speeds", {}))
-        state.metadata.setdefault(
-            "default_required_units", schema_dump.get("default_required_units", {})
-        )
+        # Convert unit type values to plain strings for consistent lookup
+        raw_required = schema_dump.get("default_required_units", {})
+        converted_required: dict[str, list[str]] = {}
+        for inc_type, unit_types in raw_required.items():
+            inc_key = getattr(inc_type, "value", None) or str(inc_type)
+            converted_required[str(inc_key)] = [
+                str(getattr(u, "value", None) or str(u)) for u in list(unit_types)
+            ]
+        state.metadata.setdefault("default_required_units", converted_required)
 
         state.metadata["max_steps"] = int(meta.get("max_steps", MAX_STEPS))
         state.metadata["waves"] = list(meta.get("waves", []))
@@ -217,13 +223,11 @@ class DispatchStateMachine:
         incident = state.incidents[action.incident_id]
 
         speed = float(self._schema.unit_speeds.get(unit.unit_type, 1.0))
-        dist = _distance(
-            unit.location_x,
-            unit.location_y,
-            incident.location_x,
-            incident.location_y,
-        )
-        eta = dist / max(speed, 1e-6)
+        # Use Manhattan distance to match move_unit_toward physics
+        dx = abs(unit.location_x - incident.location_x)
+        dy = abs(unit.location_y - incident.location_y)
+        manhattan_dist = dx + dy
+        eta = manhattan_dist / max(speed, 1e-6)
 
         unit.status = UnitStatus.DISPATCHED
         unit.assigned_incident_id = incident.incident_id

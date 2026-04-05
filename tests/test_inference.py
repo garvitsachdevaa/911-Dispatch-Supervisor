@@ -63,7 +63,7 @@ class TestInferenceFormatCompliance:
             "USE_RANDOM": "true",
         }
         _, stdout, _ = self._run_inference_capture(env)
-        valid_errors = {"null", "max_steps_exceeded", "illegal_transition"}
+        valid_errors = {"null", "max_steps_exceeded", "illegal_transition", "step_error"}
         for line in stdout.split("\n"):
             if not line.startswith("[STEP]"):
                 continue

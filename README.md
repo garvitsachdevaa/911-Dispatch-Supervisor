@@ -6,10 +6,11 @@ colorTo: orange
 sdk: docker
 pinned: false
 tags:
-	- openenv
-	- reinforcement-learning
-	- llm-agent
-	- emergency-dispatch
+
+  - openenv
+  - reinforcement-learning
+  - llm-agent
+  - emergency-dispatch
 ---
 
 # 911 City-Wide Emergency Dispatch Supervisor
@@ -28,6 +29,15 @@ This project implements a benchmark environment for training and evaluating LLM 
 - **OpenEnv compatible**: Standard RL environment interface
 - **Read-only 2D visualization**: Synchronized unit/incident visualization
 
+## Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `API_BASE_URL` | Yes | OpenAI-compatible endpoint base URL |
+| `MODEL_NAME` | Yes | Model identifier string |
+| `HF_TOKEN` | Yes (unless `USE_RANDOM=true`) | API key / HF token |
+| `USE_RANDOM` | No | Set to `true` to use deterministic random agent (no LLM) |
+
 ## Tasks
 
 ### 1. `single_incident`
@@ -45,6 +55,15 @@ High severity surge (Priority-1 heavy). Focus: survival outcomes and rapid alloc
 ### 4. `shift_surge`
 
 Longer horizon with incident waves and unit availability changes. Focus: coverage and strategic staging.
+
+### Task Difficulty Guide
+
+| Task | Difficulty | Key Challenge | Success Criteria |
+|------|-----------|---------------|-----------------|
+| `single_incident` | Easy | Dispatch the right unit type (MEDIC) quickly | Incident resolved, correct unit, ETA < 300s |
+| `multi_incident` | Medium | Triage 3 simultaneous incidents, prioritize P1 | All P1 incidents responded to, no ESCALATED |
+| `mass_casualty` | Hard | Manage wave-based surge with limited resources | Maximize P1 survival rate across waves |
+| `shift_surge` | Hard | Adapt as units go out of service over time | Maintain coverage and resolve incidents despite attrition |
 
 ## Contracts
 
@@ -120,6 +139,25 @@ python demo.py
 python inference.py
 ```
 
+## Reproducing Baseline Scores
+
+Run the random baseline agent against all 4 tasks:
+
+```bash
+USE_RANDOM=true API_BASE_URL=https://api.openai.com/v1 MODEL_NAME=gpt-4 HF_TOKEN=x python inference.py
+```
+
+Expected output (approximate):
+
+| Task | Difficulty | Random Baseline Score |
+|------|-----------|----------------------|
+| `single_incident` | Easy | ~0.55 |
+| `multi_incident` | Medium | ~0.48 |
+| `mass_casualty` | Hard | ~0.32 |
+| `shift_surge` | Hard | ~0.38 |
+
+*Scores vary slightly due to seeded randomness. Run with `seed=42` for exact reproduction.*
+
 ## Reward Function
 
 The reward signal is a weighted combination of five components:
@@ -134,18 +172,7 @@ The reward signal is a weighted combination of five components:
 
 **Safety gate:** If any Priority-1 incident was seen and `survival=0.0`, the total episode score is capped at `0.2` regardless of other components.
 
-## Baseline Scores
 
-Scores from the random baseline agent (`USE_RANDOM=true`):
-
-| Task | Difficulty | Baseline Score |
-|------|-----------|---------------|
-| `single_incident` | Easy | ~0.55 |
-| `multi_incident` | Medium | ~0.48 |
-| `mass_casualty` | Hard | ~0.32 |
-| `shift_surge` | Hard | ~0.38 |
-
-*Run `USE_RANDOM=true python inference.py` to reproduce.*
 
 ## Project Structure
 
@@ -203,14 +230,6 @@ curl http://localhost:8000/health
 curl -X POST http://localhost:8000/reset -H "Content-Type: application/json" -d '{"task_id": "single_incident", "seed": 42}'
 ```
 
-### Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `API_BASE_URL` | OpenAI API base URL | `https://api.openai.com/v1` |
-| `MODEL_NAME` | Model to use | `gpt-4` |
-| `HF_TOKEN` | HuggingFace token | None |
-
 ## API Endpoints
 
 | Endpoint | Method | Description |
@@ -220,6 +239,7 @@ curl -X POST http://localhost:8000/reset -H "Content-Type: application/json" -d 
 | `/step` | POST | Execute an action |
 | `/state` | GET | Get current environment state |
 | `/dashboard/state` | GET | Extended state for `live_dashboard.html` |
+| `/tasks` | GET | List all available tasks with metadata |
 
 ## HF Space
 

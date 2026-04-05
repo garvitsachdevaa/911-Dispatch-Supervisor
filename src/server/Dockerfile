@@ -10,4 +10,4 @@ COPY data/ /app/data/
 
 EXPOSE 8000
 
-CMD ["python", "-m", "src.server.app"]
+CMD ["uvicorn", "src.server.app:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -53,6 +53,14 @@ class TestResetEndpoint:
         assert data["result"] == "dispatch center online"
         assert data["protocol_ok"] is True
 
+    def test_reset_with_empty_body_returns_200(self) -> None:
+        """Verify prevalidation.sh compatible: POST /reset with {} returns 200."""
+        c = TestClient(server_app.app)
+        response = c.post("/reset", json={})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["result"] == "dispatch center online"
+
 
 class TestStepEndpoint:
     def test_step_requires_reset_first(self) -> None:
@@ -117,3 +125,19 @@ class TestHealthEndpoint:
         response = c.get("/health")
         assert response.status_code == 200
         assert response.json() == {"status": "ok"}
+
+
+class TestTasksEndpoint:
+    def test_tasks_endpoint_returns_four_tasks(self) -> None:
+        c = TestClient(server_app.app)
+        response = c.get("/tasks")
+        assert response.status_code == 200
+        tasks = response.json()
+        assert len(tasks) == 4
+        task_ids = {t["task_id"] for t in tasks}
+        assert task_ids == {
+            "single_incident",
+            "multi_incident",
+            "mass_casualty",
+            "shift_surge",
+        }

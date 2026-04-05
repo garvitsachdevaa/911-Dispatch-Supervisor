@@ -40,33 +40,34 @@ class SingleIncidentGrader:
         self.reward_calculator = RewardCalculator()
 
     def grade(self, state: State, rewards: list[float]) -> float:
-        """Pass if correct unit dispatched within 3 steps and ETA < 300s."""
+        """Grade based on: correct unit dispatched, fast response, incident resolved."""
         if not rewards:
             return 0.0
 
-        mean_reward = sum(rewards) / len(rewards)
-
         incident = state.incidents.get("INC-001")
         if incident is None:
-            return max(0.0, min(1.0, mean_reward))
+            return 0.0
 
-        # Find the first dispatched unit to INC-001.
-        dispatched_units = [
-            u
+        score = 0.0
+
+        # Component 1: Was the incident resolved? (50% weight)
+        if incident.status.value == "RESOLVED":
+            score += 0.50
+
+        # Component 2: Correct unit type dispatched? (30% weight)
+        medic_dispatched = any(
+            u.unit_type.value == "MEDIC"
+            and (
+                u.assigned_incident_id == "INC-001"
+                or u.status.value in {"ON_SCENE", "DISPATCHED"}
+            )
             for u in state.units.values()
-            if u.assigned_incident_id == "INC-001" and u.status != "AVAILABLE"
-        ]
+        )
+        if medic_dispatched:
+            score += 0.30
 
-        bonus = 0.0
-        if dispatched_units:
-            unit = dispatched_units[0]
-            correct_type = (unit.unit_type == UnitType.MEDIC and incident.incident_type == IncidentType.CARDIAC_ARREST)
-            if correct_type:
-                bonus += 0.2
-            if unit.eta_seconds < 300.0:
-                bonus += 0.2
+        # Component 3: Speed — resolved within first 10 steps (20% weight)
+        if incident.status.value == "RESOLVED" and state.step_count <= 10:
+            score += 0.20
 
-        # Base per spec: 0.6 + bonuses, but bounded and blended with mean reward.
-        target = 0.6 + bonus
-        total = 0.5 * mean_reward + 0.5 * target
-        return max(0.0, min(1.0, total))
+        return max(0.0, min(1.0, score))

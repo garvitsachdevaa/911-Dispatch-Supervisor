@@ -22,7 +22,7 @@ _env: OpenEnvEnvironment | None = None
 
 
 class ResetRequest(BaseModel):
-    task_id: str
+    task_id: str = "single_incident"
     seed: int | None = None
 
 
@@ -103,7 +103,19 @@ async def get_dashboard_state() -> dict[str, Any]:
     Keeps the existing /state response stable for typed clients.
     """
     if _env is None:
-        raise RuntimeError("Environment not initialized. Call /reset first.")
+        # Return an empty but valid structure before /reset is called
+        return {
+            "units": {},
+            "incidents": {},
+            "episode_id": "not-initialized",
+            "step_count": 0,
+            "task_id": "none",
+            "city_time": 0.0,
+            "metadata": {},
+            "legal_actions": [],
+            "issues": [],
+            "observation": None,
+        }
 
     state_dict = _env.state().model_dump()
     legal_actions = [a.model_dump() for a in _env.legal_actions()]
@@ -122,4 +134,8 @@ async def get_dashboard_state() -> dict[str, Any]:
 def main():
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run("src.server.app:app", host="0.0.0.0", port=8000, reload=False)
+
+
+if __name__ == "__main__":
+    main()

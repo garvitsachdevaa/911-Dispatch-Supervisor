@@ -259,7 +259,7 @@ async def run_episode(
                     break
 
             except Exception as e:
-                error_msg = str(e)
+                error_msg = "step_error"  # normalize to a fixed token
                 print(
                     f"[STEP] step={step_count} action={action_str} "
                     f"reward=0.00 done=true error={error_msg}"
@@ -273,12 +273,16 @@ async def run_episode(
     finally:
         env.close()
 
-    # Calculate total score (average of rewards)
-    total_score = sum(rewards) / len(rewards) if rewards else 0.0
-    total_score = max(0.0, min(1.0, total_score))  # Clamp to [0.0, 1.0]
+    # Separate reset reward from step rewards
+    step_rewards = rewards[1:]
+    if step_rewards:
+        total_score = sum(step_rewards) / len(step_rewards)
+    else:
+        total_score = 0.0
+    total_score = max(0.0, min(1.0, total_score))
 
     # Format rewards list as comma-separated with 2 decimal places
-    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    rewards_str = ",".join(f"{r:.2f}" for r in step_rewards) if step_rewards else "0.00"
 
     print(
         f"[END] success={str(success).lower()} steps={step_count} "

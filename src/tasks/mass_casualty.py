@@ -43,14 +43,17 @@ class MassCasualtyGrader:
         if not rewards:
             return 0.0
 
-        mean_reward = sum(rewards) / len(rewards)
-        p1_total = sum(1 for i in state.incidents.values() if i.severity == IncidentSeverity.PRIORITY_1)
-        resolved_p1 = sum(
-            1
-            for incident_id in state.metadata.get("resolved_incidents", [])
-            if state.incidents.get(incident_id, None) is not None
-            and state.incidents[incident_id].severity == IncidentSeverity.PRIORITY_1
-        )
+        p1_seen = list(state.metadata.get("p1_seen", []))
+        p1_resolved = [
+            iid
+            for iid in state.metadata.get("resolved_incidents", [])
+            if iid in p1_seen and iid not in state.metadata.get("failed_incidents", [])
+        ]
+        p1_failed = list(state.metadata.get("failed_incidents", []))
 
-        survival_ratio = resolved_p1 / max(p1_total, 1)
-        return max(0.0, min(1.0, 0.3 * mean_reward + 0.7 * survival_ratio))
+        survival_score = len(p1_resolved) / max(len(p1_seen), 1)
+        failure_penalty = len(p1_failed) / max(len(p1_seen), 1) * 0.5
+
+        mean_reward = sum(rewards) / len(rewards)
+        score = 0.6 * survival_score + 0.3 * mean_reward - failure_penalty
+        return max(0.0, min(1.0, score))

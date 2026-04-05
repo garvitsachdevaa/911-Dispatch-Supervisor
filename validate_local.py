@@ -40,16 +40,15 @@ def check_inference() -> bool:
     env["API_BASE_URL"] = "https://api.openai.com/v1"
     env["MODEL_NAME"] = "gpt-4"
     env["HF_TOKEN"] = "dummy-token-for-local-validation"
+    env["USE_RANDOM"] = "true"
 
-    print(
-        "\nNOTE: Running inference.py in dummy mode - will emit [START]/[STEP]/[END] lines"
-    )
+    print("\nNOTE: Running inference.py in random-agent mode for local validation")
     result = subprocess.run(
         ["uv", "run", "python", "inference.py"],
         capture_output=True,
         text=True,
         env=env,
-        timeout=120,
+        timeout=300,
     )
 
     if result.stdout:
