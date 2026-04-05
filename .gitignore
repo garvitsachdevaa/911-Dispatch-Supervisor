@@ -1,0 +1,53 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+.Python
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# UV
+.uv/
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local evidence & logs
+.sisyphus/evidence/
+.sisyphus/notepads/
+*.log
+tmp/
+
+# Dashboards and temp files
+dashboard.html
+*.png
+*.jpg
+
+# Environment
+.env
+.env.*
+*.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+*.tar
+
+# Jupyter
+.ipynb_checkpoints/
+
+# mypy
+.mypy_cache/

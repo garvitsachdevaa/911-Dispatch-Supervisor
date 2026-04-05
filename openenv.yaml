@@ -1,0 +1,3 @@
+name: gradient-ascent-atc
+version: "0.1.0"
+description: Gradient Ascent — Full lifecycle airport ground control benchmark powered by LLM orchestration. Supports landing→departure lifecycle with normalized ATC protocol.

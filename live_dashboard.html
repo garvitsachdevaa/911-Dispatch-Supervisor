@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLM ATC Live Dashboard</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; background: #0a0e1a; color: #e2e8f0; min-height: 100vh; }
+  
+  .header { background: linear-gradient(135deg, #1e293b, #0f172a); border-bottom: 1px solid #334155; padding: 16px 24px; display: flex; align-items: center; gap: 12px; }
+  .logo { font-size: 24px; }
+  .title { font-size: 18px; font-weight: 700; color: #f1f5f9; }
+  .subtitle { font-size: 11px; color: #64748b; }
+  .badge { background: #10b981; color: #022c22; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 4px; }
+  
+  .main { display: grid; grid-template-columns: 340px 1fr; height: calc(100vh - 57px); }
+  
+  .left-panel { padding: 20px; border-right: 1px solid #1e293b; overflow-y: auto; }
+  .right-panel { display: flex; flex-direction: column; overflow: hidden; }
+  
+  .panel-title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: #475569; margin-bottom: 12px; }
+  
+  .aircraft-card { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 14px; margin-bottom: 12px; }
+  .aircraft-name { font-size: 16px; font-weight: 700; color: #38bdf8; margin-bottom: 6px; }
+  .aircraft-phase { display: inline-block; background: #7c3aed; color: #fff; font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px; margin-bottom: 8px; }
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .stat { background: #0f172a; border-radius: 4px; padding: 6px; }
+  .stat-label { font-size: 9px; color: #475569; text-transform: uppercase; }
+  .stat-value { font-size: 14px; font-weight: 600; color: #e2e8f0; }
+  
+  .env-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 16px; }
+  
+  .controls { padding: 16px; background: #1e293b; border-top: 1px solid #334155; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  button { padding: 8px 16px; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 12px; transition: all 0.15s; }
+  .btn-start { background: #10b981; color: #022c22; }
+  .btn-start:hover { background: #059669; }
+  .btn-start:disabled { background: #334155; color: #475569; cursor: not-allowed; }
+  .btn-step { background: #3b82f6; color: #fff; }
+  .btn-step:hover { background: #2563eb; }
+  .btn-step:disabled { background: #334155; color: #475569; cursor: not-allowed; }
+  .btn-stop { background: #ef4444; color: #fff; }
+  .btn-stop:hover { background: #dc2626; }
+  .btn-stop:disabled { background: #334155; color: #475569; cursor: not-allowed; }
+  select, input { padding: 8px 12px; border: 1px solid #334155; border-radius: 6px; background: #0f172a; color: #e2e8f0; font-size: 12px; }
+  
+  .llm-section { flex: 1; display: flex; flex-direction: column; min-height: 0; border-bottom: 1px solid #1e293b; }
+  .llm-section:last-child { border-bottom: none; }
+  
+  .llm-header { padding: 8px 16px; background: #0f172a; border-bottom: 1px solid #1e293b; display: flex; justify-content: space-between; align-items: center; }
+  .llm-title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: #475569; }
+  .llm-badge { font-size: 9px; padding: 2px 6px; border-radius: 3px; font-weight: 600; }
+  .badge-prompt { background: #064e3b; color: #10b981; }
+  .badge-response { background: #1e3a5f; color: #38bdf8; }
+  .badge-action { background: #78350f; color: #fbbf24; }
+  
+  .llm-content { flex: 1; overflow-y: auto; padding: 12px 16px; font-family: 'Courier New', monospace; font-size: 12px; line-height: 1.5; background: #0a0e1a; }
+  
+  .prompt-text { color: #10b981; white-space: pre-wrap; }
+  .response-text { color: #38bdf8; white-space: pre-wrap; }
+  .action-text { color: #fbbf24; white-space: pre-wrap; }
+  .error-text { color: #ef4444; white-space: pre-wrap; }
+  .placeholder { color: #475569; font-style: italic; }
+  
+  .log-section { height: 160px; border-top: 1px solid #1e293b; display: flex; flex-direction: column; }
+  .log-header { padding: 8px 16px; background: #0f172a; border-bottom: 1px solid #1e293b; }
+  .log-title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: #475569; }
+  .log-content { flex: 1; overflow-y: auto; padding: 8px 16px; font-family: 'Courier New', monospace; font-size: 11px; background: #0a0e1a; }
+  .log-entry { padding: 2px 0; border-bottom: 1px solid #1e293b; }
+  .log-step { color: #64748b; }
+  .log-phase { color: #7c3aed; }
+  .log-llm { color: #38bdf8; }
+  .log-action { color: #fbbf24; }
+  .log-obs { color: #10b981; }
+  .log-error { color: #ef4444; }
+  
+  .radar-section { height: 280px; border-top: 1px solid #1e293b; position: relative; }
+  .radar-section canvas { width: 100%; height: 100%; }
+  
+  .status { margin-left: auto; font-size: 11px; color: #64748b; }
+  .status-running { color: #10b981; }
+  .status-error { color: #ef4444; }
+  
+  .api-key-section { margin-top: 12px; padding-top: 12px; border-top: 1px solid #334155; }
+  .api-key-label { font-size: 9px; color: #475569; text-transform: uppercase; margin-bottom: 4px; }
+  .api-key-input { width: 100%; font-size: 10px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">🎯</div>
+  <div>
+    <div class="title">LLM ATC Live Dashboard</div>
+    <div class="subtitle">Watch the LLM make decisions in real-time</div>
+  </div>
+  <div class="badge">● LIVE</div>
+</div>
+
+<div class="main">
+  <div class="left-panel">
+    <div class="panel-title">Aircraft State</div>
+    <div class="aircraft-card">
+      <div class="aircraft-name" id="ac-callsign">—</div>
+      <div class="aircraft-phase" id="ac-phase">—</div>
+      <div class="stat-grid">
+        <div class="stat"><div class="stat-label">Heading</div><div class="stat-value" id="ac-heading">—</div></div>
+        <div class="stat"><div class="stat-label">Altitude</div><div class="stat-value" id="ac-alt">—</div></div>
+        <div class="stat"><div class="stat-label">Speed</div><div class="stat-value" id="ac-speed">—</div></div>
+        <div class="stat"><div class="stat-label">Position</div><div class="stat-value" id="ac-pos">—</div></div>
+      </div>
+    </div>
+    
+    <div class="panel-title">Environment</div>
+    <div class="env-grid">
+      <div class="stat"><div class="stat-label">Task</div><div class="stat-value" id="env-task">—</div></div>
+      <div class="stat"><div class="stat-label">Episode</div><div class="stat-value" id="env-episode">—</div></div>
+      <div class="stat"><div class="stat-label">Step</div><div class="stat-value" id="env-step">0</div></div>
+      <div class="stat"><div class="stat-label">Score</div><div class="stat-value" id="env-score">0.0000</div></div>
+    </div>
+    
+    <div class="controls" style="margin-top: 16px; padding: 12px; background: #0f172a; border-radius: 6px; border: 1px solid #334155;">
+      <select id="task-select">
+        <option value="arrival">Arrival (Hard)</option>
+        <option value="departure">Departure (Easy)</option>
+        <option value="integrated">Integrated (Medium)</option>
+      </select>
+      <input type="number" id="seed-input" value="42" style="width: 70px" />
+      <button class="btn-start" id="btn-start" onclick="doStart()">▶ Start Episode</button>
+      <button class="btn-step" id="btn-step" onclick="doStep()" disabled>⏭ Step</button>
+      <button class="btn-stop" id="btn-stop" onclick="doStop()" disabled>⏹ Stop</button>
+    </div>
+    
+    <div class="api-key-section">
+      <div class="api-key-label">Groq API Key</div>
+      <input type="password" id="api-key" class="api-key-input" value="" placeholder="Enter Groq API key (gsk_...)" />
+    </div>
+  </div>
+  
+  <div class="right-panel">
+    <div class="llm-section" style="flex: 2;">
+      <div class="llm-header">
+        <span class="llm-title">LLM Thinking</span>
+        <span class="llm-badge badge-prompt">PROMPT</span>
+      </div>
+      <div class="llm-content" id="prompt-content">
+        <span class="placeholder">Press "Start Episode" or "Step" to see the LLM prompt...</span>
+      </div>
+    </div>
+    
+    <div class="llm-section" style="flex: 2;">
+      <div class="llm-header">
+        <span class="llm-title">LLM Response</span>
+        <span class="llm-badge badge-response">RESPONSE</span>
+      </div>
+      <div class="llm-content" id="response-content">
+        <span class="placeholder">LLM response will appear here...</span>
+      </div>
+    </div>
+    
+    <div class="llm-section" style="flex: 1;">
+      <div class="llm-header">
+        <span class="llm-title">Action Taken</span>
+        <span class="llm-badge badge-action">PARSED</span>
+      </div>
+      <div class="llm-content" id="action-content">
+        <span class="placeholder">Parsed action will appear here...</span>
+      </div>
+    </div>
+    
+    <div class="log-section">
+      <div class="log-header">
+        <span class="log-title">Episode Log</span>
+      </div>
+      <div class="log-content" id="log-content"></div>
+    </div>
+  </div>
+</div>
+
+<div class="radar-section">
+  <canvas id="radar"></canvas>
+</div>
+
+<script>
+const API = 'http://localhost:8000';
+const DASHBOARD_STATE = `${API}/dashboard/state`;
+const GROQ_BASE = 'https://api.groq.com/openai/v1';
+const MODEL = 'llama-3.3-70b-versatile';
+
+let currentState = null;
+let stepCount = 0;
+let episodeRunning = false;
+let episodeId = null;
+let autoStepInterval = null;
+
+const canvas = document.getElementById('radar');
+const ctx = canvas.getContext('2d');
+
+function resizeCanvas() {
+  const section = canvas.parentElement;
+  canvas.width = section.clientWidth;
+  canvas.height = section.clientHeight;
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+function worldToScreen(x, y) {
+  // Find all aircraft positions to determine bounds
+  let minX = -3000, maxX = 3000, minY = -3000, maxY = 3000;
+  if (currentState && currentState.aircraft) {
+    Object.values(currentState.aircraft).forEach(ac => {
+      if (ac.x_ft !== undefined && ac.y_ft !== undefined) {
+        minX = Math.min(minX, ac.x_ft);
+        maxX = Math.max(maxX, ac.x_ft);
+        minY = Math.min(minY, ac.y_ft);
+        maxY = Math.max(maxY, ac.y_ft);
+      }
+    });
+  }
+  
+  // Add padding
+  const padX = (maxX - minX) * 0.2 || 2000;
+  const padY = (maxY - minY) * 0.2 || 2000;
+  minX -= padX; maxX += padX;
+  minY -= padY; maxY += padY;
+  
+  const cx = canvas.width / 2;
+  const cy = canvas.height / 2;
+  const scaleX = canvas.width / (maxX - minX);
+  const scaleY = canvas.height / (maxY - minY);
+  const scale = Math.min(scaleX, scaleY) * 0.9; // 90% to add padding
+  
+  return { 
+    x: cx + (x - (minX + maxX) / 2) * scale, 
+    y: cy - (y - (minY + maxY) / 2) * scale 
+  };
+}
+
+function drawAirport() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#0f172a';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  
+  // Grid
+  ctx.strokeStyle = '#1e293b';
+  ctx.lineWidth = 1;
+  for (let i = 0; i < canvas.width; i += 40) {
+    ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, canvas.height); ctx.stroke();
+  }
+  for (let j = 0; j < canvas.height; j += 40) {
+    ctx.beginPath(); ctx.moveTo(0, j); ctx.lineTo(canvas.width, j); ctx.stroke();
+  }
+  
+  // Get aircraft center if available
+  let centerX = 0, centerY = 0;
+  if (currentState && currentState.aircraft) {
+    const acs = Object.values(currentState.aircraft);
+    if (acs.length > 0) {
+      centerX = acs.reduce((s, a) => s + (a.x_ft || 0), 0) / acs.length;
+      centerY = acs.reduce((s, a) => s + (a.y_ft || 0), 0) / acs.length;
+    }
+  }
+  
+  // Draw approach path line (dashed from aircraft toward runway)
+  if (currentState && currentState.aircraft) {
+    Object.values(currentState.aircraft).forEach(ac => {
+      if (ac.y_ft > 100) { // Only draw if far from runway
+        const aircraftScreen = worldToScreen(ac.x_ft, ac.y_ft);
+        const runwayScreen = worldToScreen(ac.x_ft, 0);
+        ctx.strokeStyle = '#7c3aed44';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([8, 8]);
+        ctx.beginPath();
+        ctx.moveTo(aircraftScreen.x, aircraftScreen.y);
+        ctx.lineTo(runwayScreen.x, runwayScreen.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        
+        // Label
+        ctx.fillStyle = '#7c3aed';
+        ctx.font = '9px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('APP', (aircraftScreen.x + runwayScreen.x) / 2, (aircraftScreen.y + runwayScreen.y) / 2);
+      }
+    });
+  }
+  
+  // Runway (centered on aircraft Y)
+  const rw1 = worldToScreen(centerX - 500, centerY);
+  const rw2 = worldToScreen(centerX + 500, centerY);
+  ctx.strokeStyle = '#475569';
+  ctx.lineWidth = 18;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(rw1.x, rw1.y);
+  ctx.lineTo(rw2.x, rw2.y);
+  ctx.stroke();
+  
+  // Threshold markers
+  ctx.strokeStyle = '#f1f5f9';
+  ctx.lineWidth = 2;
+  for (let x = -400; x <= 400; x += 100) {
+    const p = worldToScreen(centerX + x, centerY);
+    ctx.beginPath(); ctx.moveTo(p.x, p.y - 20); ctx.lineTo(p.x, p.y + 20); ctx.stroke();
+  }
+  
+  // Taxiways
+  ctx.strokeStyle = '#334155';
+  ctx.lineWidth = 8;
+  ctx.setLineDash([12, 6]);
+  const ty1 = worldToScreen(centerX, centerY - 2000);
+  const ty2 = worldToScreen(centerX, centerY + 2000);
+  ctx.beginPath(); ctx.moveTo(ty1.x, ty1.y); ctx.lineTo(ty2.x, ty2.y); ctx.stroke();
+  const tx1 = worldToScreen(centerX - 2000, centerY);
+  const tx2 = worldToScreen(centerX + 2000, centerY);
+  ctx.beginPath(); ctx.moveTo(tx1.x, tx1.y); ctx.lineTo(tx2.x, tx2.y); ctx.stroke();
+  ctx.setLineDash([]);
+  
+  // Gates
+  const gates = [
+    [-600, 200], [-400, 200], [-200, 200],
+    [200, 200], [400, 200], [600, 200],
+    [-600, -200], [-400, -200], [-200, -200],
+    [200, -200], [400, -200], [600, -200],
+  ];
+  gates.forEach(([gx, gy]) => {
+    const p = worldToScreen(centerX + gx, centerY + gy);
+    ctx.strokeStyle = '#10b981';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(p.x - 25, p.y - 15, 50, 30);
+    ctx.fillStyle = '#10b981';
+    ctx.font = '8px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('GATE', p.x, p.y + 3);
+  });
+  
+  // Compass rose (top right)
+  const cx = canvas.width - 60, cy = 60;
+  ctx.strokeStyle = '#334155';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(cx, cy - 20); ctx.lineTo(cx, cy + 20); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx - 20, cy); ctx.lineTo(cx + 20, cy); ctx.stroke();
+  ctx.fillStyle = '#ef4444'; ctx.font = '10px monospace'; ctx.textAlign = 'center';
+  ctx.fillText('N', cx, cy - 24);
+}
+
+function drawAircraft(x, y, heading, callsign) {
+  const p = worldToScreen(x, y);
+  const size = 18;
+  
+  ctx.save();
+  ctx.translate(p.x, p.y);
+  ctx.rotate(-heading * Math.PI / 180);
+  
+  ctx.fillStyle = '#38bdf8';
+  ctx.beginPath();
+  ctx.moveTo(0, -size);
+  ctx.lineTo(size * 0.6, size * 0.6);
+  ctx.lineTo(0, size * 0.3);
+  ctx.lineTo(-size * 0.6, size * 0.6);
+  ctx.closePath();
+  ctx.fill();
+  
+  ctx.strokeStyle = '#0ea5e9';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  
+  ctx.restore();
+  
+  ctx.fillStyle = '#38bdf8';
+  ctx.font = 'bold 10px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(callsign, p.x, p.y - 16);
+}
+
+function render(state) {
+  drawAirport();
+  if (state && state.aircraft) {
+    Object.values(state.aircraft).forEach(ac => {
+      drawAircraft(ac.x_ft, ac.y_ft, ac.heading_deg, ac.callsign);
+    });
+  }
+}
+
+function updateUI(state) {
+  if (!state) return;
+  const ac = Object.values(state.aircraft || {})[0] || {};
+  document.getElementById('ac-callsign').textContent = ac.callsign || '—';
+  document.getElementById('ac-phase').textContent = state.phase?.replace('_', ' ') || '—';
+  document.getElementById('ac-heading').textContent = ac.heading_deg ? `${ac.heading_deg.toFixed(0)}°` : '—';
+  document.getElementById('ac-alt').textContent = ac.altitude_ft ? `${ac.altitude_ft.toFixed(0)} ft` : '—';
+  document.getElementById('ac-speed').textContent = ac.speed_kt ? `${ac.speed_kt.toFixed(0)} kt` : '—';
+  document.getElementById('ac-pos').textContent = ac.x_ft ? `${ac.x_ft.toFixed(0)}, ${ac.y_ft.toFixed(0)}` : '—';
+  document.getElementById('env-task').textContent = state.task_id || '—';
+  document.getElementById('env-episode').textContent = state.episode_id?.slice(0,8) || '—';
+  document.getElementById('env-step').textContent = state.step_count ?? stepCount;
+  document.getElementById('env-score').textContent = state.metadata?.cumulative_reward?.toFixed(4) || '0.0000';
+}
+
+function addLog(text, cls = 'step') {
+  const log = document.getElementById('log-content');
+  const div = document.createElement('div');
+  div.className = `log-entry log-${cls}`;
+  div.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+}
+
+function setStatus(msg, type = '') {
+  const el = document.getElementById('status-msg') || createStatus();
+  el.textContent = msg;
+  el.className = 'status' + (type ? ' status-' + type : '');
+}
+
+function createStatus() {
+  const el = document.createElement('div');
+  el.id = 'status-msg';
+  el.className = 'status';
+  document.querySelector('.controls').appendChild(el);
+  return el;
+}
+
+function setPromptText(text) {
+  const el = document.getElementById('prompt-content');
+  el.innerHTML = `<pre class="prompt-text">${escapeHtml(text)}</pre>`;
+}
+
+function setResponseText(text) {
+  const el = document.getElementById('response-content');
+  el.innerHTML = `<pre class="response-text">${escapeHtml(text)}</pre>`;
+}
+
+function setActionText(text) {
+  const el = document.getElementById('action-content');
+  el.innerHTML = `<pre class="action-text">${escapeHtml(text)}</pre>`;
+}
+
+function setErrorText(text) {
+  const el = document.getElementById('response-content');
+  el.innerHTML = `<pre class="error-text">${escapeHtml(text)}</pre>`;
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function buildSystemPrompt() {
+  return `You are an expert ATC ground control agent. Aircraft lifecycle phases (in order):
+
+ARRIVAL: approach -> landing -> arrival_handoff -> taxi_in -> docking -> at_gate
+DEPARTURE: at_gate -> pushback -> taxi_out -> departure_queue -> takeoff -> departed
+
+Rules:
+- at_gate: After ~60s turnaround, MUST issue PUSHBACK first (never taxi before pushback)
+- pushback: issue TAXI with route to departure queue (e.g. taxiway A, taxiway B, departure_queue)
+- taxi_out: issue HOLD_SHORT at runway holding point before crossing active runway
+- departure_queue: wait, then issue LINE_UP when runway is clear for immediate departure
+- approach: issue LANDING clearance when aircraft is on final approach
+- arrival_handoff: issue TAXI with route to assigned gate (e.g. runway_exit, taxiway C, gate)
+- taxi_in: issue HOLD_SHORT before crossing any active runway
+
+Respond with ONLY the exact action string from the legal actions list. No explanation.`;
+}
+
+function buildUserPrompt(state, legalActions, prevIssues) {
+  const stateDesc = `phase=${state.phase}, aircraft=${Object.keys(state.aircraft).join(', ')}`;
+  const actionStrs = legalActions.map(a => `- ${a.clearance_type} ${a.target_callsign}`).join('\n');
+  
+  let prompt = `Current state: ${stateDesc}\n\nLegal actions:\n${actionStrs}`;
+  
+  if (prevIssues && prevIssues.length > 0) {
+    prompt += `\n\nPrevious action issues: ${prevIssues.join(', ')}. Adapt your next action accordingly.`;
+  }
+  
+  prompt += `\n\nRespond with ONLY the correct action string.`;
+  return prompt;
+}
+
+async function callGroq(messages) {
+  const apiKey = document.getElementById('api-key').value;
+  if (!apiKey) {
+    throw new Error('Missing Groq API key');
+  }
+  const response = await fetch(`${GROQ_BASE}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      messages: messages
+    })
+  });
+  
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`Groq API error: ${response.status} - ${err}`);
+  }
+  
+  const data = await response.json();
+  return data.choices[0].message.content;
+}
+
+function parseActionFromResponse(response, legalActions) {
+  const responseLower = response.toLowerCase();
+  
+  for (const action of legalActions) {
+    const actionRepr = `${action.clearance_type} ${action.target_callsign}`.toLowerCase();
+    if (responseLower.includes(actionRepr)) {
+      return action;
+    }
+  }
+  
+  for (const action of legalActions) {
+    const clearanceLower = action.clearance_type.toLowerCase();
+    const callsignLower = action.target_callsign.toLowerCase();
+    if (responseLower.includes(clearanceLower) && responseLower.includes(callsignLower)) {
+      return action;
+    }
+  }
+  
+  return null;
+}
+
+function formatAction(action) {
+  if (!action) return 'NONE (fallback to no-op)';
+  let str = `${action.clearance_type} ${action.target_callsign}`;
+  if (action.route && action.route.length > 0) {
+    str += ` via ${action.route.slice(0, 2).join(' → ')}`;
+  }
+  if (action.pushback_direction) {
+    str += ` (${action.pushback_direction})`;
+  }
+  if (action.runway) {
+    str += ` runway ${action.runway}`;
+  }
+  return str;
+}
+
+async function doReset() {
+  const task = document.getElementById('task-select').value;
+  const seed = parseInt(document.getElementById('seed-input').value) || 42;
+  
+  setStatus('Resetting...');
+  
+  try {
+    await fetch(`${API}/reset`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_id: task, seed })
+    });
+    
+    currentState = await fetch(DASHBOARD_STATE).then(r => r.json());
+    stepCount = 0;
+    episodeId = currentState.episode_id;
+    
+    updateUI(currentState);
+    render(currentState);
+    
+    addLog(`RESET → ${task} (seed=${seed})`, 'action');
+    setStatus(`Ready · Episode ${episodeId?.slice(0,8) || '?'}`);
+    
+    return true;
+  } catch(e) {
+    setStatus('Error: ' + e.message, 'error');
+    addLog(`ERROR: ${e.message}`, 'error');
+    return false;
+  }
+}
+
+async function doStart() {
+  const resetOk = await doReset();
+  if (!resetOk) return;
+  
+  episodeRunning = true;
+  document.getElementById('btn-start').disabled = true;
+  document.getElementById('btn-step').disabled = true;
+  document.getElementById('btn-stop').disabled = false;
+  
+  addLog('AUTO-STEP STARTED', 'action');
+  setStatus('Running auto-step...', 'running');
+  
+  autoStepInterval = setInterval(async () => {
+    if (!episodeRunning) return;
+    await executeStep();
+  }, 1500);
+}
+
+function doStop() {
+  episodeRunning = false;
+  if (autoStepInterval) {
+    clearInterval(autoStepInterval);
+    autoStepInterval = null;
+  }
+  
+  document.getElementById('btn-start').disabled = false;
+  document.getElementById('btn-step').disabled = false;
+  document.getElementById('btn-stop').disabled = true;
+  
+  addLog('AUTO-STEP STOPPED', 'action');
+  setStatus('Stopped');
+}
+
+async function doStep() {
+  if (!currentState) {
+    const resetOk = await doReset();
+    if (!resetOk) return;
+  }
+  await executeStep();
+}
+
+async function executeStep() {
+  if (!currentState) return;
+  
+  setStatus('Thinking...');
+  
+  try {
+    const stateRes = await fetch(DASHBOARD_STATE).then(r => r.json());
+    currentState = stateRes;
+    
+    const legalActions = stateRes.legal_actions || [];
+    const prevIssues = stateRes.issues || [];
+    
+    // During APPROACH phase, no legal actions is normal - aircraft is descending
+    // We still need to step to advance the simulation
+    if (legalActions.length === 0) {
+      const callsign = Object.keys(stateRes.aircraft || {})[0] || 'BAW123';
+      const ac = Object.values(stateRes.aircraft || {})[0] || {};
+      const alt = ac.altitude_ft ? ac.altitude_ft.toFixed(0) : '?';
+      const dist = ac.y_ft ? ac.y_ft.toFixed(0) : '?';
+      addLog(`[Step ${stepCount + 1}] APPROACH: Altitude ${alt}ft | Distance to runway: ${dist}ft (auto-descending 25ft/step)`, 'phase');
+      
+      // Send LANDING action to trigger _step_approach (advances descent physics)
+      const stepRes = await fetch(`${API}/step`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: { clearance_type: 'landing', target_callsign: callsign, runway: '27L' } })
+      });
+      
+      stepCount++;
+      const newState = await fetch(DASHBOARD_STATE).then(r => r.json());
+      currentState = newState;
+      updateUI(currentState);
+      render(currentState);
+      const newAc = Object.values(newState.aircraft || {})[0] || {};
+      const newAlt = newAc.altitude_ft ? newAc.altitude_ft.toFixed(0) : '?';
+      setStatus(`Step ${stepCount} · Descending: ${newAlt}ft (need 50ft for landing clearance)`);
+      return;
+    }
+    
+    const systemPrompt = buildSystemPrompt();
+    const userPrompt = buildUserPrompt(stateRes, legalActions, prevIssues);
+    
+    setPromptText(`[SYSTEM]\n${systemPrompt}\n\n[USER]\n${userPrompt}`);
+    setResponseText('...');
+    setActionText('...');
+    
+    const apiKey = document.getElementById('api-key').value;
+    let llmResponse = null;
+    let parsedAction = null;
+
+    if (apiKey) {
+      try {
+        llmResponse = await callGroq([
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ]);
+        setResponseText(llmResponse);
+        parsedAction = parseActionFromResponse(llmResponse, legalActions);
+      } catch(e) {
+        setErrorText(`API Error: ${e.message}`);
+        addLog(`[Step ${stepCount + 1}] LLM API Error: ${e.message}`, 'error');
+        setStatus('LLM Error: ' + e.message, 'error');
+        return;
+      }
+    } else {
+      setResponseText('[no API key] using first legal action');
+      parsedAction = legalActions[0] || null;
+    }
+    
+    if (parsedAction) {
+      setActionText(formatAction(parsedAction));
+      const llmSnippet = llmResponse ? `"${llmResponse.slice(0, 50)}..."` : '[no LLM]';
+      addLog(`[Step ${stepCount + 1}] Phase: ${stateRes.phase} | LLM: ${llmSnippet} | Action: ${formatAction(parsedAction)}`, 'llm');
+    } else {
+      setActionText(`PARSE FAILED - Response didn't match any legal action. Falling back.`);
+      const llmSnippet = llmResponse ? `"${llmResponse.slice(0, 50)}..."` : '[no LLM]';
+      addLog(`[Step ${stepCount + 1}] PARSE FAILED for: ${llmSnippet}`, 'error');
+    }
+    
+    const actionToSend = parsedAction || {
+      clearance_type: 'taxi',
+      target_callsign: Object.keys(stateRes.aircraft)[0] || 'BAW123',
+      route: []
+    };
+    
+    const stepRes = await fetch(`${API}/step`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: actionToSend })
+    });
+    
+    const stepData = await stepRes.json();
+    stepCount++;
+    
+    currentState = await fetch(DASHBOARD_STATE).then(r => r.json());
+    updateUI(currentState);
+    render(currentState);
+    
+    const rewardStr = stepData.reward?.toFixed(4) || '0.0000';
+    setStatus(`Step ${stepCount} · Score: ${rewardStr}`);
+    addLog(`[Step ${stepCount}] Obs: ${stepData.observation?.result || 'ok'} | Reward: ${rewardStr} | Done: ${stepData.done}`, 'obs');
+    
+    if (stepData.done) {
+      doStop();
+      setStatus(`Episode complete! Score: ${rewardStr}`);
+      addLog(`EPISODE COMPLETE | Final Score: ${rewardStr}`, 'action');
+    }
+    
+  } catch(e) {
+    setStatus('Error: ' + e.message, 'error');
+    addLog(`ERROR: ${e.message}`, 'error');
+  }
+}
+
+// Initialize
+render(null);
+
+// Initial state fetch to verify API is running
+fetch(DASHBOARD_STATE)
+  .then(r => r.json())
+  .then(s => {
+    currentState = s;
+    updateUI(s);
+    render(s);
+    setStatus('Ready · API connected');
+  })
+  .catch(e => {
+    setStatus('API not connected - start server on port 8000', 'error');
+  });
+</script>
+</body>
+</html>

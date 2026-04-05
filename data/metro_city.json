@@ -1,0 +1,24 @@
+{
+  "city_name": "Metro City",
+  "grid_size": [100, 100],
+  "districts": ["downtown", "northside", "eastport", "suburbs", "industrial"],
+  "units": [
+    {"unit_id": "ENG-1", "unit_type": "ENGINE", "base_x": 10, "base_y": 20, "crew_count": 4},
+    {"unit_id": "ENG-2", "unit_type": "ENGINE", "base_x": 50, "base_y": 50, "crew_count": 4},
+    {"unit_id": "MED-1", "unit_type": "MEDIC", "base_x": 15, "base_y": 25, "crew_count": 2},
+    {"unit_id": "MED-2", "unit_type": "MEDIC", "base_x": 70, "base_y": 30, "crew_count": 2},
+    {"unit_id": "LAD-1", "unit_type": "LADDER", "base_x": 10, "base_y": 20, "crew_count": 5},
+    {"unit_id": "PAT-1", "unit_type": "PATROL", "base_x": 30, "base_y": 60, "crew_count": 2},
+    {"unit_id": "PAT-2", "unit_type": "PATROL", "base_x": 80, "base_y": 10, "crew_count": 2},
+    {"unit_id": "HAZ-1", "unit_type": "HAZMAT", "base_x": 90, "base_y": 80, "crew_count": 3}
+  ],
+  "unit_speeds": {"ENGINE": 0.8, "LADDER": 0.6, "MEDIC": 1.0, "PATROL": 1.2, "HAZMAT": 0.5},
+  "default_required_units": {
+    "STRUCTURE_FIRE": ["ENGINE", "ENGINE", "LADDER"],
+    "CARDIAC_ARREST": ["MEDIC"],
+    "MULTI_VEHICLE_ACCIDENT": ["MEDIC", "PATROL"],
+    "SHOOTING": ["MEDIC", "PATROL", "PATROL"],
+    "HAZMAT_SPILL": ["HAZMAT", "ENGINE"],
+    "BUILDING_COLLAPSE": ["ENGINE", "LADDER", "MEDIC", "MEDIC"]
+  }
+}

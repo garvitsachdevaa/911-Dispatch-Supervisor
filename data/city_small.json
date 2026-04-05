@@ -1,0 +1,16 @@
+{
+  "city_name": "Smallville",
+  "grid_size": [20, 20],
+  "districts": ["center", "north", "south"],
+  "units": [
+    {"unit_id": "MED-1", "unit_type": "MEDIC", "base_x": 10, "base_y": 10, "crew_count": 2},
+    {"unit_id": "ENG-1", "unit_type": "ENGINE", "base_x": 5, "base_y": 5, "crew_count": 4},
+    {"unit_id": "PAT-1", "unit_type": "PATROL", "base_x": 15, "base_y": 15, "crew_count": 2}
+  ],
+  "unit_speeds": {"ENGINE": 0.8, "MEDIC": 1.0, "PATROL": 1.2},
+  "default_required_units": {
+    "CARDIAC_ARREST": ["MEDIC"],
+    "STRUCTURE_FIRE": ["ENGINE"],
+    "SHOOTING": ["PATROL"]
+  }
+}
