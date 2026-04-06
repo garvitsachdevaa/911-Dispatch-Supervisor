@@ -141,3 +141,32 @@ class TestTasksEndpoint:
             "mass_casualty",
             "shift_surge",
         }
+
+
+class TestDashboardEndpoint:
+    def test_dashboard_state_before_reset_returns_valid_shape(self) -> None:
+        c = TestClient(server_app.app)
+        response = c.get("/dashboard/state")
+        assert response.status_code == 200
+
+        data = response.json()
+        assert data["task_id"] == "none"
+        assert data["step_count"] == 0
+        assert isinstance(data["units"], dict)
+        assert isinstance(data["incidents"], dict)
+        assert isinstance(data["legal_actions"], list)
+        assert isinstance(data["issues"], list)
+        assert data["observation"] is None
+
+    def test_dashboard_state_after_reset_exposes_legal_actions(self) -> None:
+        c = TestClient(server_app.app)
+        reset_response = c.post("/reset", json={"task_id": "single_incident", "seed": 42})
+        assert reset_response.status_code == 200
+
+        response = c.get("/dashboard/state")
+        assert response.status_code == 200
+
+        data = response.json()
+        assert data["task_id"] == "single_incident"
+        assert isinstance(data["legal_actions"], list)
+        assert data["observation"] is not None

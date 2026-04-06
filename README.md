@@ -421,14 +421,31 @@ USE_RANDOM=true \
   uv run python inference.py
 ```
 
+Run the baseline matrix (random + Open LLM reruns) and emit a JSON report:
+
+```bash
+API_BASE_URL=https://api.openai.com/v1 \
+MODEL_NAME=nvidia/Nemotron-3-Super-49B-v1 \
+OPENAI_API_KEY=your_token \
+uv run python scripts/run_baseline_matrix.py --random-runs 1 --llm-runs 3 --output-json baseline_nemotron_report.json
+```
+
+Windows PowerShell shortcut:
+
+```powershell
+$env:OPENAI_API_KEY="your_token"
+powershell -ExecutionPolicy Bypass -File scripts/run_nemotron_baseline.ps1 -RandomRuns 1 -LlmRuns 3
+```
+
 | Task | Difficulty | Random Baseline Score |
 |---|---|---|
-| `single_incident` | Easy | ~0.55 |
-| `multi_incident` | Medium | ~0.48 |
-| `mass_casualty` | Hard | ~0.32 |
-| `shift_surge` | Hard | ~0.38 |
+| `single_incident` | Easy | ~0.30 |
+| `multi_incident` | Medium | ~0.70 |
+| `mass_casualty` | Hard | ~0.74 |
+| `shift_surge` | Hard | ~0.56 |
 
-*Scores use `seed=42` for reproducibility. Variance is low across runs due to deterministic state machine.*
+*Scores above are from deterministic random-agent inference with `seed=42`.*
+*For Open LLM evaluation, use Nemotron 3 Super as the primary baseline and report mean/std across reruns.*
 
 ---
 
@@ -557,10 +574,13 @@ uv run pytest tests/test_inference.py -v
 uv run python validate_local.py
 
 # OpenEnv spec validation
-uv run openenv validate
+openenv validate
 
 # HF Space validation (requires deployed space)
 bash samplematerial/prevalidation.sh https://your-space.hf.space .
+
+# Windows (explicit Git Bash)
+"C:/Program Files/Git/bin/bash.exe" samplematerial/prevalidation.sh https://your-space.hf.space .
 ```
 
 ---

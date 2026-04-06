@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import subprocess
+import shutil
 import sys
+from pathlib import Path
 
 
 def run_command(
@@ -14,7 +16,18 @@ def run_command(
     print(f"CHECK: {description}")
     print(f"CMD: {' '.join(cmd)}")
     print(f"{'=' * 60}")
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except FileNotFoundError as exc:
+        print(f"FAILED: {description}")
+        print(f"ERROR: command not found: {cmd[0]}")
+        return subprocess.CompletedProcess(cmd, 127, stdout="", stderr=str(exc))
     if result.stdout:
         print(result.stdout)
     if result.stderr:
@@ -26,10 +39,33 @@ def run_command(
     return result
 
 
+def _tool_path(name: str) -> str | None:
+    """Resolve tool path from PATH or current interpreter's Scripts directory."""
+    found = shutil.which(name)
+    if found:
+        return found
+
+    scripts_dir = Path(sys.executable).resolve().parent
+    candidates = [
+        scripts_dir / name,
+        scripts_dir / f"{name}.exe",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
+def _python_cmd(*args: str) -> list[str]:
+    """Build a Python command, preferring uv when available."""
+    uv = _tool_path("uv")
+    if uv:
+        return [uv, "run", "python", *args]
+    return [sys.executable, *args]
+
+
 def check_pytest() -> bool:
-    result = run_command(
-        ["uv", "run", "python", "-m", "pytest", "tests/", "-q"], "All tests pass"
-    )
+    result = run_command(_python_cmd("-m", "pytest", "tests/", "-q"), "All tests pass")
     return result.returncode == 0
 
 
@@ -44,9 +80,11 @@ def check_inference() -> bool:
 
     print("\nNOTE: Running inference.py in random-agent mode for local validation")
     result = subprocess.run(
-        ["uv", "run", "python", "inference.py"],
+        _python_cmd("inference.py"),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         env=env,
         timeout=300,
     )
@@ -68,11 +106,28 @@ def check_inference() -> bool:
 
 
 def check_docker_build() -> bool:
+    if not shutil.which("docker"):
+        print("FAILED: Docker build succeeds")
+        print("ERROR: docker command not found")
+        return False
+
     result = run_command(
         ["docker", "build", "-t", "citywide-dispatch-supervisor", "."],
         "Docker build succeeds",
         check=False,
     )
+    return result.returncode == 0
+
+
+def check_openenv_validate() -> bool:
+    openenv = _tool_path("openenv")
+    if not openenv:
+        print("FAILED: openenv validate passes")
+        print("ERROR: openenv command not found")
+        print("HINT: Install with: pip install openenv-core")
+        return False
+
+    result = run_command([openenv, "validate"], "openenv validate passes", check=False)
     return result.returncode == 0
 
 
@@ -109,6 +164,7 @@ def main() -> int:
         ("pytest", check_pytest),
         ("inference", check_inference),
         ("docker_build", check_docker_build),
+        ("openenv_validate", check_openenv_validate),
         ("benchmark_scores", check_benchmark_scores),
     ]
 

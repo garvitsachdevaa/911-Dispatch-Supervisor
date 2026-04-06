@@ -62,6 +62,30 @@ portable_mktemp() {
   mktemp "${TMPDIR:-/tmp}/${prefix}-XXXXXX" 2>/dev/null || mktemp
 }
 
+resolve_openenv() {
+  if command -v openenv &>/dev/null; then
+    command -v openenv
+    return 0
+  fi
+
+  local candidates=(
+    "$REPO_DIR/../.venv/Scripts/openenv.exe"
+    "$REPO_DIR/.venv/Scripts/openenv.exe"
+    "$REPO_DIR/../.venv/bin/openenv"
+    "$REPO_DIR/.venv/bin/openenv"
+  )
+
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    if [ -x "$candidate" ]; then
+      printf "%s\n" "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 CLEANUP_FILES=()
 cleanup() { rm -f "${CLEANUP_FILES[@]+"${CLEANUP_FILES[@]}"}"; }
 trap cleanup EXIT
@@ -157,14 +181,16 @@ fi
 
 log "${BOLD}Step 3/3: Running openenv validate${NC} ..."
 
-if ! command -v openenv &>/dev/null; then
+OPENENV_BIN=""
+if ! OPENENV_BIN="$(resolve_openenv)"; then
   fail "openenv command not found"
-  hint "Install it: pip install openenv-core"
+  hint "Install it in your active env: pip install openenv-core"
+  hint "Or activate your project venv before running this script."
   stop_at "Step 3"
 fi
 
 VALIDATE_OK=false
-VALIDATE_OUTPUT=$(cd "$REPO_DIR" && openenv validate 2>&1) && VALIDATE_OK=true
+VALIDATE_OUTPUT=$(cd "$REPO_DIR" && "$OPENENV_BIN" validate 2>&1) && VALIDATE_OK=true
 
 if [ "$VALIDATE_OK" = true ]; then
   pass "openenv validate passed"

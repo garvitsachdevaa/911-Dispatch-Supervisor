@@ -36,6 +36,18 @@
   .fill { height: 100%; width: 0%; background: #38bdf8; }
   .kpi { display: flex; justify-content: space-between; font-size: 11px; color: #cbd5e1; margin-bottom: 6px; }
   .status { margin-top: 10px; font-size: 11px; color: #64748b; }
+  .history-item { border-bottom: 1px solid #1e293b; padding: 8px 0; font-size: 11px; color: #cbd5e1; }
+  .history-item:last-child { border-bottom: 0; }
+  .history-step { color: #94a3b8; margin-right: 8px; }
+  .history-issues { color: #fbbf24; display: block; margin-top: 4px; }
+
+  @media (max-width: 1200px) {
+    .layout { grid-template-rows: auto auto; height: auto; min-height: calc(100vh - 52px); }
+    .main { grid-template-columns: 1fr; }
+    .col + .col { border-left: 0; border-top: 1px solid #1e293b; }
+    .map { min-height: 260px; }
+    .breakdown { grid-template-columns: repeat(2, 1fr); }
+  }
 </style>
 </head>
 <body>
@@ -47,7 +59,8 @@
     <div class="pill">Task: <strong id="hdr-task">—</strong></div>
     <div class="pill">Episode: <strong id="hdr-episode">—</strong></div>
     <div class="pill">Step: <strong id="hdr-step">—</strong></div>
-    <div class="pill">Score: <strong id="hdr-score">—</strong></div>
+    <div class="pill">Episode Score: <strong id="hdr-episode-score">—</strong></div>
+    <div class="pill">Cumulative Reward: <strong id="hdr-cum-reward">—</strong></div>
   </div>
 </div>
 
@@ -77,11 +90,13 @@
     <div class="col">
       <div class="panel-title">Incidents</div>
       <div id="incidents"></div>
+      <div class="panel-title" style="margin-top:14px;">Recent Events</div>
+      <div id="history"></div>
     </div>
   </div>
 
   <div class="bottom">
-    <div class="panel-title">Episode Score Breakdown</div>
+    <div class="panel-title">Step Reward Breakdown (latest observation)</div>
     <div class="breakdown">
       <div>
         <div class="kpi"><span>response_time</span><span id="v-response_time">0.00</span></div>
@@ -111,6 +126,11 @@
 const API = 'http://localhost:8000';
 const DASHBOARD_STATE = `${API}/dashboard/state`;
 const REFRESH_MS = 500;
+const HISTORY_LIMIT = 12;
+
+let lastHistoryEpisode = null;
+let lastHistoryStep = -1;
+let eventHistory = [];
 
 const STATUS_COLORS = {
   AVAILABLE: '#10b981',
@@ -135,6 +155,15 @@ function fmt(v, digits=2) {
 function setText(id, text) {
   const el = document.getElementById(id);
   if (el) el.textContent = text;
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
 }
 
 function renderUnits(state) {
@@ -175,11 +204,17 @@ function renderIncidents(state) {
     const sev = String(i.severity || '');
     const sevColor = sev === 'PRIORITY_1' ? '#ef4444' : (sev === 'PRIORITY_2' ? '#fbbf24' : '#38bdf8');
     const units = (i.units_assigned || []).join(', ') || '—';
+    const survival = Number(i.survival_clock);
+    const survivalStr = Number.isFinite(survival) ? `${survival.toFixed(0)}s` : '—';
+    const p1ClockRow = sev === 'PRIORITY_1'
+      ? `<div class="row"><div class="muted">p1 clock</div><div>${survivalStr}</div></div>`
+      : '';
     const card = document.createElement('div');
     card.className = 'card';
     card.innerHTML = `
       <div class="row"><div><strong style="color:${sevColor}">${i.incident_id}</strong> <span class="muted">(${i.incident_type})</span></div><div class="muted">${i.status}</div></div>
       <div class="row" style="margin-top:8px"><div class="muted">severity</div><div>${i.severity}</div></div>
+      ${p1ClockRow}
       <div class="row"><div class="muted">assigned</div><div>${units}</div></div>
       <div class="row"><div class="muted">pos</div><div>${fmt(i.location_x,0)}, ${fmt(i.location_y,0)}</div></div>
     `;
@@ -239,8 +274,10 @@ function renderMap(state) {
     const color = sev === 'PRIORITY_1' ? '#ef4444' : (sev === 'PRIORITY_2' ? '#fbbf24' : '#38bdf8');
     const x = Number(i.location_x || 0);
     const y = Number(i.location_y || 0);
+    const p1Clock = Number(i.survival_clock);
+    const p1Suffix = (sev === 'PRIORITY_1' && Number.isFinite(p1Clock)) ? ` (${p1Clock.toFixed(0)}s)` : '';
     svg.appendChild(svgEl('circle', { cx: x, cy: y, r: Math.max(0.7, Math.min(w,h) * 0.012), fill: color, stroke: '#0f172a', 'stroke-width': 0.3 }));
-    svg.appendChild(svgEl('text', { x: x + 1, y: y - 1, fill: '#e2e8f0', 'font-size': 2.8, 'font-family': 'monospace' })).textContent = i.incident_id;
+    svg.appendChild(svgEl('text', { x: x + 1, y: y - 1, fill: '#e2e8f0', 'font-size': 2.8, 'font-family': 'monospace' })).textContent = `${i.incident_id}${p1Suffix}`;
   }
 
   // units
@@ -271,8 +308,49 @@ function updateHeader(state) {
   setText('hdr-task', state.task_id || '—');
   setText('hdr-episode', state.episode_id ? String(state.episode_id).slice(0, 8) : '—');
   setText('hdr-step', (state.step_count !== undefined) ? String(state.step_count) : '—');
+  const episodeScore = state.metadata && state.metadata.episode_score;
   const cum = state.metadata && state.metadata.cumulative_reward;
-  setText('hdr-score', (cum !== undefined) ? fmt(cum, 3) : '—');
+  setText('hdr-episode-score', (episodeScore !== undefined) ? fmt(episodeScore, 3) : '—');
+  setText('hdr-cum-reward', (cum !== undefined) ? fmt(cum, 3) : '—');
+}
+
+function updateHistory(state) {
+  const obs = state.observation;
+  if (!obs) return;
+
+  if (lastHistoryEpisode !== state.episode_id) {
+    lastHistoryEpisode = state.episode_id;
+    lastHistoryStep = -1;
+    eventHistory = [];
+  }
+
+  if (state.step_count === lastHistoryStep) return;
+
+  const issues = Array.isArray(state.issues) ? state.issues : [];
+  eventHistory.unshift({
+    step: state.step_count,
+    result: obs.result || 'state updated',
+    issues,
+  });
+  eventHistory = eventHistory.slice(0, HISTORY_LIMIT);
+  lastHistoryStep = state.step_count;
+}
+
+function renderHistory() {
+  const root = document.getElementById('history');
+  if (!root) return;
+
+  if (eventHistory.length === 0) {
+    root.innerHTML = '<div class="muted">No events yet</div>';
+    return;
+  }
+
+  root.innerHTML = eventHistory.map((item) => {
+    const issueText = item.issues.length > 0
+      ? `<span class="history-issues">issues: ${escapeHtml(item.issues.join(', '))}</span>`
+      : '';
+    return `<div class="history-item"><span class="history-step">step ${item.step}</span>${escapeHtml(item.result)}${issueText}</div>`;
+  }).join('');
 }
 
 async function tick() {
@@ -292,9 +370,12 @@ async function tick() {
     renderMap(state);
     renderIncidents(state);
     renderBreakdown(state);
+    updateHistory(state);
+    renderHistory();
 
-    const issues = Array.isArray(state.issues) ? state.issues.length : 0;
-    status.textContent = `Connected · issues=${issues} · refresh=${REFRESH_MS}ms`;
+    const issueList = Array.isArray(state.issues) ? state.issues : [];
+    const issuePreview = issueList.length > 0 ? issueList.slice(0, 2).join(', ') : 'none';
+    status.textContent = `Connected · issues=${issueList.length} (${issuePreview}) · refresh=${REFRESH_MS}ms`;
   } catch (e) {
     status.textContent = `Disconnected · start server on :8000 (${String(e.message || e)})`;
   }

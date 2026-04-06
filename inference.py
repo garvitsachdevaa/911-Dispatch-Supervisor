@@ -70,6 +70,7 @@ class LLMAgent:
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.model = model
+        self._rng = random.Random(42)
 
         # Official OpenAI Python client for OpenAI-compatible endpoints.
         self._client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url)
@@ -142,7 +143,7 @@ Respond with ONLY the exact action string from the legal actions list. No explan
                 return action
 
         # Fallback to random if LLM response doesn't match
-        return random.choice(legal_actions)
+        return self._rng.choice(legal_actions)
 
 
 def _format_action(action: Action) -> str:
@@ -198,11 +199,11 @@ async def run_episode(
     step_count = 0
     rewards: list[float] = []
     success = False
-    error_msg: str | None = None
+    episode_score = 0.0
 
     try:
         observation = await env.reset()
-        rewards.append(observation.score)
+        episode_score = float(observation.score)
         prev_obs = observation
 
         while True:
@@ -230,6 +231,7 @@ async def run_episode(
                 obs, reward, done = await env.step(action)
                 prev_obs = obs
                 rewards.append(reward)
+                episode_score = float(obs.score)
 
                 # Terminal conditions: done flag OR any protocol-invalid transition.
                 has_illegal_transition = any(
@@ -264,7 +266,6 @@ async def run_episode(
 
                 # Safety check for runaway episodes
                 if step_count >= 1000:
-                    error_msg = "max_steps_exceeded"
                     print(
                         f"[STEP] step={step_count} action={action_str} "
                         f"reward={reward_str} done=true error=max_steps_exceeded"
@@ -273,26 +274,21 @@ async def run_episode(
                     break
 
             except Exception as e:
-                error_msg = "step_error"  # normalize to a fixed token
                 print(
                     f"[STEP] step={step_count} action={action_str} "
-                    f"reward=0.00 done=true error={error_msg}"
+                    f"reward=0.00 done=true error=step_error"
                 )
                 success = False
                 break
 
     except Exception as e:
-        error_msg = str(e)
         success = False
     finally:
         env.close()
 
-    # Separate reset reward from step rewards
-    step_rewards = rewards[1:]
-    if step_rewards:
-        total_score = sum(step_rewards) / len(step_rewards)
-    else:
-        total_score = 0.0
+    # OpenEnv publishes episode score in observation.score; keep this for [END].
+    step_rewards = rewards
+    total_score = episode_score
     total_score = max(0.0, min(1.0, total_score))
 
     # Format rewards list as comma-separated with 2 decimal places
@@ -331,12 +327,12 @@ async def main() -> int:
 
     except EnvironmentError as e:
         # Emit [END] to stdout for failure case
-        print("[END] success=false steps=0 score=0.000 rewards=")
+        print("[END] success=false steps=0 score=0.000 rewards=0.00")
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
     except Exception as e:
         # Emit [END] to stdout for failure case
-        print("[END] success=false steps=0 score=0.000 rewards=")
+        print("[END] success=false steps=0 score=0.000 rewards=0.00")
         print(f"ERROR: Unexpected error: {e}", file=sys.stderr)
         return 1
 

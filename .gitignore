@@ -28,6 +28,7 @@ htmlcov/
 .sisyphus/notepads/
 *.log
 tmp/
+baseline_*_report.json
 
 # Do not commit architecture notes
 architecture.md
