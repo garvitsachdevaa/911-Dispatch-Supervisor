@@ -77,6 +77,13 @@ class TestEnvVarValidation:
         cmd = [sys.executable, "inference.py"]
         merged_env = os.environ.copy()
         merged_env.update(env)
+
+        # Ensure tests are not affected by host environment variables.
+        # If the test doesn't provide a required var, explicitly remove it.
+        if "API_BASE_URL" not in env:
+            merged_env.pop("API_BASE_URL", None)
+        if "MODEL_NAME" not in env:
+            merged_env.pop("MODEL_NAME", None)
         result = subprocess.run(
             cmd,
             capture_output=True,
