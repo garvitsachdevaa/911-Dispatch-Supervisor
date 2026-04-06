@@ -49,7 +49,7 @@ def _distance(x1: float, y1: float, x2: float, y2: float) -> float:
 class DispatchStateMachine:
     """Deterministic dispatch state machine.
 
-    Supports a minimal action set (DISPATCH, CANCEL) and advances incidents through:
+    Supports dispatch operations and advances incidents through:
     PENDING → RESPONDING → ON_SCENE → RESOLVED.
     """
 
@@ -117,32 +117,162 @@ class DispatchStateMachine:
         actions: list[Action] = []
 
         active_incidents = [
-            i
-            for i in state.incidents.values()
-            if i.status not in {IncidentStatus.RESOLVED}
+            i for i in state.incidents.values() if i.status not in {IncidentStatus.RESOLVED}
         ]
         if not active_incidents:
             return actions
 
-        for unit in state.units.values():
-            if unit.status == UnitStatus.AVAILABLE:
-                for incident in active_incidents:
-                    actions.append(
-                        Action(
-                            action_type=DispatchAction.DISPATCH,
-                            unit_id=unit.unit_id,
-                            incident_id=incident.incident_id,
-                        )
-                    )
-            elif unit.assigned_incident_id is not None:
+        # Keep ordering stable and DISPATCH-first for callers that take legal[0].
+        active_incidents_sorted = sorted(active_incidents, key=lambda i: i.incident_id)
+        units_sorted = sorted(state.units.values(), key=lambda u: u.unit_id)
+
+        # Pick a deterministic "reference" unit for actions that don't semantically need one
+        # (UPGRADE/DOWNGRADE require unit_id in the Action contract).
+        ref_unit_id = units_sorted[0].unit_id if units_sorted else ""
+
+        # DISPATCH actions (primary control surface)
+        for unit in units_sorted:
+            if unit.status != UnitStatus.AVAILABLE:
+                continue
+            for incident in active_incidents_sorted:
                 actions.append(
                     Action(
-                        action_type=DispatchAction.CANCEL,
+                        action_type=DispatchAction.DISPATCH,
                         unit_id=unit.unit_id,
-                        incident_id=unit.assigned_incident_id,
+                        incident_id=incident.incident_id,
                     )
                 )
-        return actions
+
+        # STAGE actions (pre-position without committing as assigned)
+        for unit in units_sorted:
+            if unit.status != UnitStatus.AVAILABLE:
+                continue
+            for incident in active_incidents_sorted:
+                if incident.status != IncidentStatus.PENDING:
+                    continue
+                actions.append(
+                    Action(
+                        action_type=DispatchAction.STAGE,
+                        unit_id=unit.unit_id,
+                        incident_id=incident.incident_id,
+                    )
+                )
+
+        # CANCEL actions (release currently assigned units)
+        for unit in units_sorted:
+            if unit.assigned_incident_id is None:
+                continue
+            actions.append(
+                Action(
+                    action_type=DispatchAction.CANCEL,
+                    unit_id=unit.unit_id,
+                    incident_id=unit.assigned_incident_id,
+                )
+            )
+
+        # REASSIGN actions (redirect already-assigned units to a different active incident)
+        for unit in units_sorted:
+            if unit.assigned_incident_id is None:
+                continue
+            if unit.status not in {UnitStatus.DISPATCHED, UnitStatus.ON_SCENE, UnitStatus.TRANSPORTING}:
+                continue
+            for incident in active_incidents_sorted:
+                if incident.incident_id == unit.assigned_incident_id:
+                    continue
+                actions.append(
+                    Action(
+                        action_type=DispatchAction.REASSIGN,
+                        unit_id=unit.unit_id,
+                        incident_id=incident.incident_id,
+                    )
+                )
+
+        # MUTUAL_AID actions (only for unit types with no local availability)
+        # Use any existing unit as the "type selector".
+        available_types = {u.unit_type for u in units_sorted if u.status == UnitStatus.AVAILABLE}
+        type_to_template_unit: dict[object, str] = {}
+        for unit in units_sorted:
+            type_to_template_unit.setdefault(unit.unit_type, unit.unit_id)
+
+        for unit_type, template_unit_id in sorted(type_to_template_unit.items(), key=lambda kv: str(kv[0])):
+            if unit_type in available_types:
+                continue
+            for incident in active_incidents_sorted:
+                actions.append(
+                    Action(
+                        action_type=DispatchAction.MUTUAL_AID,
+                        unit_id=template_unit_id,
+                        incident_id=incident.incident_id,
+                    )
+                )
+
+        # UPGRADE / DOWNGRADE actions (severity adjustments)
+        if ref_unit_id:
+            for incident in active_incidents_sorted:
+                if incident.status == IncidentStatus.RESOLVED:
+                    continue
+
+                # These candidates are filtered by protocol validation at step-time,
+                # but we only generate the obviously-relevant ones.
+                if incident.severity == IncidentSeverity.PRIORITY_1:
+                    actions.append(
+                        Action(
+                            action_type=DispatchAction.DOWNGRADE,
+                            unit_id=ref_unit_id,
+                            incident_id=incident.incident_id,
+                            priority_override=IncidentSeverity.PRIORITY_2,
+                        )
+                    )
+                    actions.append(
+                        Action(
+                            action_type=DispatchAction.DOWNGRADE,
+                            unit_id=ref_unit_id,
+                            incident_id=incident.incident_id,
+                            priority_override=IncidentSeverity.PRIORITY_3,
+                        )
+                    )
+                elif incident.severity == IncidentSeverity.PRIORITY_2:
+                    actions.append(
+                        Action(
+                            action_type=DispatchAction.UPGRADE,
+                            unit_id=ref_unit_id,
+                            incident_id=incident.incident_id,
+                            priority_override=IncidentSeverity.PRIORITY_1,
+                        )
+                    )
+                    actions.append(
+                        Action(
+                            action_type=DispatchAction.DOWNGRADE,
+                            unit_id=ref_unit_id,
+                            incident_id=incident.incident_id,
+                            priority_override=IncidentSeverity.PRIORITY_3,
+                        )
+                    )
+                else:
+                    actions.append(
+                        Action(
+                            action_type=DispatchAction.UPGRADE,
+                            unit_id=ref_unit_id,
+                            incident_id=incident.incident_id,
+                            priority_override=IncidentSeverity.PRIORITY_2,
+                        )
+                    )
+                    actions.append(
+                        Action(
+                            action_type=DispatchAction.UPGRADE,
+                            unit_id=ref_unit_id,
+                            incident_id=incident.incident_id,
+                            priority_override=IncidentSeverity.PRIORITY_1,
+                        )
+                    )
+
+        # Filter out any actions that violate the protocol validator.
+        legal: list[Action] = []
+        for a in actions:
+            result = self._validator.validate(self._schema, state, a)
+            if result.ok:
+                legal.append(a)
+        return legal
 
     def step(self, state: State, action: Action) -> tuple[State, Observation]:
         validation = self._validator.validate(self._schema, state, action)
@@ -170,6 +300,14 @@ class DispatchStateMachine:
             self._apply_dispatch(state, action)
         elif action.action_type == DispatchAction.CANCEL:
             self._apply_cancel(state, action)
+        elif action.action_type == DispatchAction.REASSIGN:
+            self._apply_reassign(state, action)
+        elif action.action_type == DispatchAction.STAGE:
+            self._apply_stage(state, action)
+        elif action.action_type == DispatchAction.MUTUAL_AID:
+            self._apply_mutual_aid(state, action)
+        elif action.action_type in {DispatchAction.UPGRADE, DispatchAction.DOWNGRADE}:
+            self._apply_severity_change(state, action)
 
         state = self._tick(state)
 
@@ -254,6 +392,102 @@ class DispatchStateMachine:
         }:
             incident.status = IncidentStatus.PENDING
             incident.survival_clock = _severity_deadline_seconds(incident.severity)
+
+    def _apply_reassign(self, state: State, action: Action) -> None:
+        unit = state.units[action.unit_id]
+        new_incident = state.incidents[action.incident_id]
+
+        old_incident_id = unit.assigned_incident_id
+        old_incident = state.incidents.get(old_incident_id) if old_incident_id else None
+
+        # Remove from the old incident, if present.
+        if old_incident is not None and unit.unit_id in old_incident.units_assigned:
+            old_incident.units_assigned.remove(unit.unit_id)
+            if not old_incident.units_assigned and old_incident.status in {
+                IncidentStatus.RESPONDING,
+                IncidentStatus.ON_SCENE,
+            }:
+                old_incident.status = IncidentStatus.PENDING
+                old_incident.survival_clock = _severity_deadline_seconds(old_incident.severity)
+
+        # Assign to the new incident like a dispatch.
+        unit.status = UnitStatus.DISPATCHED
+        unit.assigned_incident_id = new_incident.incident_id
+
+        speed = float(self._schema.unit_speeds.get(unit.unit_type, 1.0))
+        dx = abs(unit.location_x - new_incident.location_x)
+        dy = abs(unit.location_y - new_incident.location_y)
+        manhattan_dist = dx + dy
+        eta = manhattan_dist / max(speed, 1e-6)
+        unit.eta_seconds = max(0.0, float(eta))
+
+        if unit.unit_id not in new_incident.units_assigned:
+            new_incident.units_assigned.append(unit.unit_id)
+        if new_incident.status == IncidentStatus.PENDING:
+            new_incident.status = IncidentStatus.RESPONDING
+
+    def _apply_stage(self, state: State, action: Action) -> None:
+        """Pre-position a unit towards an incident without counting as 'assigned'."""
+        unit = state.units[action.unit_id]
+        incident = state.incidents[action.incident_id]
+
+        speed = float(self._schema.unit_speeds.get(unit.unit_type, 1.0))
+        dx = abs(unit.location_x - incident.location_x)
+        dy = abs(unit.location_y - incident.location_y)
+        manhattan_dist = dx + dy
+        eta = manhattan_dist / max(speed, 1e-6)
+
+        unit.status = UnitStatus.DISPATCHED
+        unit.assigned_incident_id = incident.incident_id
+        unit.eta_seconds = max(0.0, float(eta))
+
+    def _apply_mutual_aid(self, state: State, action: Action) -> None:
+        """Request an external unit of the given type and dispatch it."""
+        template = state.units[action.unit_id]
+        incident = state.incidents[action.incident_id]
+
+        counter = int(state.metadata.get("mutual_aid_counter", 0)) + 1
+        state.metadata["mutual_aid_counter"] = counter
+
+        prefix = template.unit_type.value[:3]
+        new_unit_id = f"MA-{prefix}-{counter}"
+        new_unit_id = new_unit_id[:20]
+
+        speed = float(self._schema.unit_speeds.get(template.unit_type, 1.0))
+        dx = abs(template.location_x - incident.location_x)
+        dy = abs(template.location_y - incident.location_y)
+        manhattan_dist = dx + dy
+        base_eta = manhattan_dist / max(speed, 1e-6)
+        penalty = float(state.metadata.get("mutual_aid_eta_penalty", 120.0))
+
+        unit = UnitState(
+            unit_id=new_unit_id,
+            unit_type=template.unit_type,
+            status=UnitStatus.DISPATCHED,
+            location_x=float(template.location_x),
+            location_y=float(template.location_y),
+            assigned_incident_id=incident.incident_id,
+            eta_seconds=max(0.0, float(base_eta + penalty)),
+            crew_count=int(template.crew_count),
+        )
+        state.units[unit.unit_id] = unit
+
+        if unit.unit_id not in incident.units_assigned:
+            incident.units_assigned.append(unit.unit_id)
+        if incident.status == IncidentStatus.PENDING:
+            incident.status = IncidentStatus.RESPONDING
+
+    def _apply_severity_change(self, state: State, action: Action) -> None:
+        if action.priority_override is None:
+            return
+        incident = state.incidents[action.incident_id]
+        incident.severity = action.priority_override
+
+        # Update clocks based on current incident phase.
+        if incident.status in {IncidentStatus.PENDING, IncidentStatus.RESPONDING}:
+            incident.survival_clock = _severity_deadline_seconds(incident.severity)
+        elif incident.status == IncidentStatus.ON_SCENE:
+            incident.survival_clock = _resolve_timer_seconds(incident.severity)
 
     def _tick(self, state: State) -> State:
         state.step_count += 1

@@ -56,13 +56,33 @@ class DispatchProtocolValidator:
             error(f"Unknown incident_id '{action.incident_id}'")
             return ValidationResult(ok=False, issues=issues)
 
-        if action.action_type in {DispatchAction.DISPATCH, DispatchAction.REASSIGN}:
+        if action.action_type == DispatchAction.DISPATCH:
             if unit.status != UnitStatus.AVAILABLE:
                 error(f"Unit '{unit.unit_id}' not available (status={unit.status})")
             if unit.assigned_incident_id is not None:
                 error(f"Unit '{unit.unit_id}' already assigned to '{unit.assigned_incident_id}'")
             if incident.status in {IncidentStatus.RESOLVED}:
                 error(f"Incident '{incident.incident_id}' already resolved")
+
+            # Triage type matching is a soft rule: record warning, do not invalidate.
+            required = schema.default_required_units.get(incident.incident_type)
+            if required is not None and required:
+                if unit.unit_type not in required:
+                    warn(
+                        f"Unit '{unit.unit_id}' type {unit.unit_type} mismatches "
+                        f"recommended {incident.incident_type} types {required}"
+                    )
+
+        elif action.action_type == DispatchAction.REASSIGN:
+            if incident.status in {IncidentStatus.RESOLVED}:
+                error(f"Incident '{incident.incident_id}' already resolved")
+            if unit.assigned_incident_id is None:
+                error(f"Unit '{unit.unit_id}' is not currently assigned")
+            elif unit.assigned_incident_id == incident.incident_id:
+                error(f"Unit '{unit.unit_id}' already assigned to incident '{incident.incident_id}'")
+
+            if unit.status not in {UnitStatus.DISPATCHED, UnitStatus.ON_SCENE, UnitStatus.TRANSPORTING}:
+                error(f"Unit '{unit.unit_id}' cannot be reassigned (status={unit.status})")
 
             # Triage type matching is a soft rule: record warning, do not invalidate.
             required = schema.default_required_units.get(incident.incident_type)
