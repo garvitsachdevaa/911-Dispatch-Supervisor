@@ -10,6 +10,7 @@ from src.models import (
     State,
     UnitStatus,
 )
+from src.phraseology import PhraseologyJudge
 
 
 def _clamp01(value: float) -> float:
@@ -83,7 +84,7 @@ class RewardCalculator:
         triage = self._compute_triage(state, action)
         survival = self._compute_survival(state)
         coverage = self._compute_coverage(state)
-        protocol = self._compute_protocol(obs)
+        protocol = self._compute_protocol(action, obs)
 
         signal = RewardSignal(
             response_time=response_time,
@@ -193,8 +194,25 @@ class RewardCalculator:
 
         return _clamp01(len(covered) / len(districts))
 
-    def _compute_protocol(self, obs: Observation) -> float:
-        return 1.0 if obs.protocol_ok else 0.0
+    def _compute_protocol(self, action: Action, obs: Observation) -> float:
+        """Score action protocol + phraseology quality.
+
+        - If the action is illegal, protocol score is 0.0.
+        - If action is legal and no phraseology is provided (`Action.notes`), return neutral 0.5.
+        - If phraseology is provided, use PhraseologyJudge to score correctness/readback.
+        """
+
+        if not obs.protocol_ok:
+            return 0.0
+
+        candidate = (action.notes or "").strip()
+        if not candidate:
+            return 0.5
+
+        judge = PhraseologyJudge()
+        phrase_score = float(judge.score(action, candidate))
+        readback_score = 1.0 if judge.check_readback(candidate, action) else 0.0
+        return _clamp01(0.6 * phrase_score + 0.4 * readback_score)
 
     def _compute_weighted_total(self, signal: RewardSignal, state: State) -> float:
         total = (

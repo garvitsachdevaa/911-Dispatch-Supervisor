@@ -65,14 +65,41 @@ def test_reward_signal_requires_fields() -> None:
 def test_compute_reward_returns_tuple() -> None:
     calc = RewardCalculator()
     state = _state_with_one_dispatch()
-    action = Action(action_type=DispatchAction.DISPATCH, unit_id="MED-1", incident_id="INC-001")
+    action = Action(
+        action_type=DispatchAction.DISPATCH,
+        unit_id="MED-1",
+        incident_id="INC-001",
+        notes="DISPATCH MED-1 -> INC-001",
+    )
     obs = Observation(result="ok", score=0.8, protocol_ok=True, issues=[])
     signal, total = calc.compute_reward(state, action, obs)
     assert isinstance(signal, RewardSignal)
     # Fixture metadata stores enum-ish strings (e.g. "IncidentType.CARDIAC_ARREST").
     # Triage should still award full credit for a correct match.
     assert signal.triage == 1.0
+    assert signal.protocol == 1.0
     assert 0.0 <= total <= 1.0
+
+
+def test_protocol_reward_uses_phraseology_notes() -> None:
+    calc = RewardCalculator()
+    state = _state_with_one_dispatch()
+    obs = Observation(result="ok", score=0.8, protocol_ok=True, issues=[])
+
+    # No notes => neutral.
+    action_no_notes = Action(action_type=DispatchAction.DISPATCH, unit_id="MED-1", incident_id="INC-001")
+    signal, _ = calc.compute_reward(state, action_no_notes, obs)
+    assert signal.protocol == 0.5
+
+    # Wrong notes => poor phraseology score.
+    action_bad_notes = Action(
+        action_type=DispatchAction.DISPATCH,
+        unit_id="MED-1",
+        incident_id="INC-001",
+        notes="send car 12",
+    )
+    signal2, _ = calc.compute_reward(state, action_bad_notes, obs)
+    assert signal2.protocol == 0.0
 
 
 def test_weights_sum_to_one() -> None:

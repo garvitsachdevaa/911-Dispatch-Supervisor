@@ -27,7 +27,27 @@ This project implements a benchmark environment for training and evaluating LLM 
 - **Deterministic simulation**: Reproducible episodes under fixed seeds
 - **Protocol validator**: Checks if actions are legal in the current state
 - **OpenEnv compatible**: Standard RL environment interface
-- **Read-only 2D visualization**: Synchronized unit/incident visualization
+- **Read-only 2D visualization**: Synchronized unit/incident visualization (see below)
+
+## Visualizer (Judges: please check this)
+
+The 2D visualizer is in `src/visualizer/viewer.py` and renders the current state to a PNG.
+
+Minimal example (renders one frame):
+
+```python
+import asyncio
+from src.openenv_environment import OpenEnvEnvironment
+from src.visualizer.viewer import Viewer2D
+
+async def main():
+  env = OpenEnvEnvironment(task_id="multi_incident", seed=42)
+  await env.reset()
+  Viewer2D().render_to_file("frame.png", env.state())
+  env.close()
+
+asyncio.run(main())
+```
 
 ## Environment Variables
 
@@ -79,7 +99,7 @@ Longer horizon with incident waves and unit availability changes. Focus: coverag
 | `action_type` | `DispatchAction` | e.g. `DISPATCH`, `CANCEL`, `UPGRADE`, `MUTUAL_AID` |
 | `unit_id` | `str` | Unit identifier, e.g. `MED-1` |
 | `incident_id` | `str` | Incident identifier, e.g. `INC-0001` |
-| `notes` | `str \| None` | Optional free text |
+| `notes` | `str \| None` | Optional free text (used for phraseology/readback scoring) |
 | `priority_override` | `IncidentSeverity \| None` | Required for upgrade/downgrade |
 
 ### Observation
@@ -89,7 +109,7 @@ Longer horizon with incident waves and unit availability changes. Focus: coverag
 | Field | Type | Notes |
 |------|------|-------|
 | `result` | `str` | Human-readable result |
-| `score` | `float` | Step reward in `[0,1]` |
+| `score` | `float` | Episode score in `[0,1]` (per-step reward is returned separately by `/step`) |
 | `protocol_ok` | `bool` | Whether action was legal |
 | `issues` | `list[str]` | Warnings/errors from protocol validator |
 | `reward_breakdown` | `dict[str,float] \| None` | Component scores for dashboard |
@@ -172,7 +192,7 @@ The reward signal is a weighted combination of five components:
 | `triage` | 25% | Whether the dispatched unit type matches incident requirements |
 | `survival` | 25% | Whether Priority-1 incidents are resolved before survival clock expires |
 | `coverage` | 12% | Geographic distribution of available units across city districts |
-| `protocol` | 8% | Whether the dispatch action was legally valid |
+| `protocol` | 8% | Action legality + dispatch phraseology/readback quality (via `Action.notes`) |
 
 **Safety gate:** If any Priority-1 incident was seen and `survival=0.0`, the total episode score is capped at `0.2` regardless of other components.
 
