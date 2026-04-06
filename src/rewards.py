@@ -16,6 +16,35 @@ def _clamp01(value: float) -> float:
     return max(0.0, min(1.0, float(value)))
 
 
+def _normalize_enumish_key(value: object) -> str:
+    """Normalize keys that may be stored as Enum-ish strings.
+
+    We accept forms like:
+    - "CARDIAC_ARREST"
+    - "IncidentType.CARDIAC_ARREST"
+    - "src.models.IncidentType.CARDIAC_ARREST"
+    - Enum members (IncidentType.CARDIAC_ARREST)
+    """
+
+    if isinstance(value, str):
+        text = value
+    else:
+        text = getattr(value, "value", None) or str(value)
+
+    # If the value looks like a qualified enum name, use the trailing segment.
+    if "." in text:
+        return text.split(".")[-1]
+    return text
+
+
+def _normalize_str_list(values: object) -> list[str]:
+    if values is None:
+        return []
+    if not isinstance(values, (list, tuple, set)):
+        return [_normalize_enumish_key(values)]
+    return [_normalize_enumish_key(v) for v in values]
+
+
 class RewardSignal(BaseModel):
     """Signal components for reward breakdown."""
 
@@ -102,17 +131,22 @@ class RewardCalculator:
         if unit is None or incident is None:
             return 0.0
 
-        required_map = state.metadata.get("default_required_units", {})
-        # Try both formats: plain value and StrEnum repr
-        required_types = (
-            required_map.get(incident.incident_type.value, [])
-            or required_map.get(str(incident.incident_type), [])
-        )
+        required_map_raw = state.metadata.get("default_required_units", {})
+        if not isinstance(required_map_raw, dict):
+            return 0.5
+
+        # Normalize metadata so lookups work across serialization styles.
+        required_map: dict[str, list[str]] = {
+            _normalize_enumish_key(k): _normalize_str_list(v) for k, v in required_map_raw.items()
+        }
+
+        incident_key = _normalize_enumish_key(incident.incident_type)
+        required_types = required_map.get(incident_key, [])
         if not required_types:
             return 0.5
 
-        # required_types are stored as strings in metadata.
-        if unit.unit_type.value in set(required_types):
+        # required_types are stored as strings in metadata (often with enum qualifiers).
+        if _normalize_enumish_key(unit.unit_type) in set(required_types):
             return 1.0
         return 0.0
 

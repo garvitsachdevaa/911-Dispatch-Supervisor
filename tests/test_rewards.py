@@ -69,6 +69,9 @@ def test_compute_reward_returns_tuple() -> None:
     obs = Observation(result="ok", score=0.8, protocol_ok=True, issues=[])
     signal, total = calc.compute_reward(state, action, obs)
     assert isinstance(signal, RewardSignal)
+    # Fixture metadata stores enum-ish strings (e.g. "IncidentType.CARDIAC_ARREST").
+    # Triage should still award full credit for a correct match.
+    assert signal.triage == 1.0
     assert 0.0 <= total <= 1.0
 
 
