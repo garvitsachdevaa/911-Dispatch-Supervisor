@@ -8,10 +8,7 @@ from typing import Any
 
 from src.models import Action, DispatchAction
 from src.openenv_environment import OpenEnvEnvironment
-from src.tasks.mass_casualty import MassCasualtyGrader
-from src.tasks.multi_incident import MultiIncidentGrader
-from src.tasks.shift_surge import ShiftSurgeGrader
-from src.tasks.single_incident import SingleIncidentGrader
+from src.rewards import TaskGrader
 from src.tasks.registry import TaskRegistry
 
 
@@ -23,27 +20,14 @@ def list_tasks() -> list[dict[str, Any]]:
     ]
 
 
-def _get_grader(task_id: str) -> Any:
-    if task_id == "single_incident":
-        return SingleIncidentGrader()
-    elif task_id == "multi_incident":
-        return MultiIncidentGrader()
-    elif task_id == "mass_casualty":
-        return MassCasualtyGrader()
-    elif task_id == "shift_surge":
-        return ShiftSurgeGrader()
-    raise KeyError(f"Unknown task: {task_id}")
-
-
 async def _run_episode_async(task_id: str, seed: int) -> tuple[float, list[float]]:
     env = OpenEnvEnvironment(task_id=task_id, seed=seed)
     rewards: list[float] = []
     final_state = None
 
     try:
-        obs = await env.reset()
+        await env.reset()
         final_state = env.state()
-        rewards.append(obs.score)
 
         rng = random.Random(seed)
         for _ in range(1000):
@@ -73,7 +57,6 @@ async def _run_episode_async(task_id: str, seed: int) -> tuple[float, list[float
     finally:
         env.close()
 
-    grader = _get_grader(task_id)
     if final_state is None:
         from src.models import State
 
@@ -87,7 +70,10 @@ async def _run_episode_async(task_id: str, seed: int) -> tuple[float, list[float
             metadata={},
         )
 
-    return grader.grade(final_state, rewards), rewards
+    # Score episodes the same way as the OpenEnv evaluation path:
+    # a normalized aggregate of per-step rewards.
+    final_score = TaskGrader().grade_episode(rewards, task_id=task_id)
+    return final_score, rewards
 
 
 def run_task(task_id: str, seed: int) -> dict[str, Any]:

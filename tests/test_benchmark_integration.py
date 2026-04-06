@@ -16,6 +16,13 @@ def test_run_task_score_in_range() -> None:
     result = run_task("single_incident", seed=42)
     assert 0.0 <= result["score"] <= 1.0
     assert result["task_id"] == "single_incident"
+    # Benchmark scoring must match the OpenEnv evaluation path: mean step reward.
+    rewards = result["rewards"]
+    if rewards:
+        expected = sum(rewards) / len(rewards)
+    else:
+        expected = 0.0
+    assert abs(result["score"] - expected) < 1e-9
 
 
 def test_run_all_scores_in_range() -> None:
