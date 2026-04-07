@@ -2,8 +2,9 @@
 
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from src.models import Action, Observation, State
@@ -77,15 +78,66 @@ async def schema() -> dict[str, Any]:
 
 
 @app.post("/mcp")
-async def mcp(payload: dict[str, Any]) -> dict[str, Any]:
-    """Minimal MCP JSON-RPC endpoint.
+async def mcp(request: Request) -> dict:
+    """Full MCP JSON-RPC endpoint supporting reset/step/state/legal_actions methods."""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON"}, status_code=400)
 
-    The OpenEnv runtime validator only checks that this endpoint is reachable
-    and returns a JSON-RPC shaped response.
-    """
+    method = body.get("method", "")
+    req_id = body.get("id", 1)
 
-    req_id = payload.get("id")
-    return {"jsonrpc": "2.0", "id": req_id, "result": {"ok": True}}
+    if method == "reset":
+        params = body.get("params", {})
+        global _env
+        _env = OpenEnvEnvironment(
+            task_id=params.get("task_id", "single_incident"),
+            seed=params.get("seed"),
+        )
+        obs = await _env.reset()
+        return {"jsonrpc": "2.0", "id": req_id, "result": obs.model_dump()}
+
+    elif method == "step":
+        if _env is None:
+            return JSONResponse(
+                {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32000, "message": "Environment not initialized. Call reset first."}},
+                status_code=400,
+            )
+        action_data = body.get("params", {}).get("action", {})
+        try:
+            action = Action.model_validate(action_data)
+        except Exception as e:
+            return JSONResponse(
+                {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32602, "message": f"Invalid action: {e}"}},
+                status_code=400,
+            )
+        obs, reward, done = await _env.step(action)
+        return {
+            "jsonrpc": "2.0", "id": req_id,
+            "result": {"observation": obs.model_dump(), "reward": reward, "done": done},
+        }
+
+    elif method == "state":
+        if _env is None:
+            return JSONResponse(
+                {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32000, "message": "Environment not initialized."}},
+                status_code=400,
+            )
+        return {"jsonrpc": "2.0", "id": req_id, "result": _env.state().model_dump()}
+
+    elif method == "legal_actions":
+        if _env is None:
+            return {"jsonrpc": "2.0", "id": req_id, "result": []}
+        actions = _env.legal_actions()
+        return {"jsonrpc": "2.0", "id": req_id, "result": [a.model_dump() for a in actions]}
+
+    else:
+        # Unknown method — still return 200 with JSON-RPC error (OpenEnv validator just checks reachability)
+        return {
+            "jsonrpc": "2.0", "id": req_id,
+            "error": {"code": -32601, "message": f"Method not found: {method}"},
+        }
 
 
 @app.get("/tasks")
@@ -175,7 +227,7 @@ def main():
     import uvicorn
     import os
 
-    port = int(os.environ.get("PORT", "8000"))
+    port = int(os.environ.get("PORT", "7860"))
     uvicorn.run("src.server.app:app", host="0.0.0.0", port=port, reload=False)
 
 

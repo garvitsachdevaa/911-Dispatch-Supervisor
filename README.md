@@ -317,34 +317,27 @@ asyncio.run(main())
 
 ## Quick Start
 
-### Using uv (Recommended)
-
 ```bash
 # Install dependencies
-uv sync
+pip install -r requirements.txt
 
 # Run the demo (non-interactive, no LLM required)
-uv run python demo.py
+python demo.py
 
 # Start the API server
-uv run python -m src.server.app
+python -m src.server.app
 
-# Run inference with random baseline (no API key required)
-USE_RANDOM=true \
-  API_BASE_URL=https://api.openai.com/v1 \
-  MODEL_NAME=gpt-4 \
-  OPENAI_API_KEY=dummy \
-  uv run python inference.py
+# Run random agent baseline (no API key required)
+USE_RANDOM=true python inference.py
+
+# Run LLM agent
+API_BASE_URL=https://router.huggingface.co/v1 \
+  MODEL_NAME=meta-llama/Llama-3.1-8B-Instruct \
+  HF_TOKEN=your_token \
+  python inference.py
 
 # Run full test suite
-uv run pytest tests/ -v
-```
-
-### Using pip
-
-```bash
-pip install -r requirements.txt
-python demo.py
+pytest tests/ -v
 ```
 
 ---
@@ -357,17 +350,14 @@ python demo.py
 # Build image
 docker build -t citywide-dispatch-supervisor .
 
-# Run (defaults to port 8000)
-docker run -p 8000:8000 citywide-dispatch-supervisor
-
-# Run on custom port (for HF Spaces)
-docker run -e PORT=7860 -p 7860:7860 citywide-dispatch-supervisor
+# Run on port 7860 (required for HF Spaces)
+docker run -p 7860:7860 citywide-dispatch-supervisor
 
 # Health check
-curl http://localhost:8000/health
+curl http://localhost:7860/health
 
 # Reset to a specific task
-curl -X POST http://localhost:8000/reset \
+curl -X POST http://localhost:7860/reset \
   -H "Content-Type: application/json" \
   -d '{"task_id": "multi_incident", "seed": 42}'
 ```
@@ -397,55 +387,47 @@ bash samplematerial/prevalidation.sh https://your-space.hf.space .
 
 ## Environment Variables
 
-| Variable | Required | Description |
+| Variable | Description | Default |
 |---|---|---|
-| `API_BASE_URL` | Yes | OpenAI-compatible endpoint base URL |
-| `MODEL_NAME` | Yes | Model identifier string |
-| `OPENAI_API_KEY` | Yes (unless `USE_RANDOM=true`) | API key for the OpenAI client |
-| `USE_RANDOM` | No | Set to `true` to run a deterministic random baseline agent (no API key needed) |
-| `PORT` | No | Server port (default: 8000; HF Spaces sets this automatically) |
-
-> **Backwards compatibility**: `HF_TOKEN` is accepted as a fallback for `OPENAI_API_KEY`.
+| `API_BASE_URL` | LLM API endpoint | `https://router.huggingface.co/v1` |
+| `MODEL_NAME` | Model identifier | `meta-llama/Llama-3.1-8B-Instruct` |
+| `HF_TOKEN` | HuggingFace API key | — |
+| `USE_RANDOM` | Set `true` for deterministic random baseline | `false` |
+| `PORT` | Server port | `7860` |
 
 ---
 
 ## Baseline Scores
 
-Run the random baseline agent against all tasks:
+Scores normalized to `[0.0, 1.0]` using `sum(rewards) / max_steps`.  
+Run with `USE_RANDOM=true python inference.py` (seed=42, fully deterministic).
+
+| Task | Difficulty | Max Steps | Random Agent Score |
+|---|---|---|---|
+| `single_incident` | Easy | 20 | 0.2000 |
+| `multi_incident` | Medium | 40 | 0.3117 |
+| `mass_casualty` | Hard | 60 | 0.4645 |
+| `shift_surge` | Hard | 60 | 0.3183 |
+
+> **Note:** Earlier README versions showed higher scores (~0.30–0.74) from a different scoring path (`observation.score`). These figures use the canonical competition normalization: `sum(step_rewards) / max_steps`, clamped to `[0.0, 1.0]`.
+
+LLM agents (`meta-llama/Llama-3.1-8B-Instruct` via `https://router.huggingface.co/v1`) are expected to score meaningfully higher on easy and medium tasks by correctly prioritizing P1 incidents and matching unit types.
+
+Run the baseline matrix (random + LLM reruns) and emit a JSON report:
 
 ```bash
-USE_RANDOM=true \
-  API_BASE_URL=https://api.openai.com/v1 \
-  MODEL_NAME=gpt-4 \
-  OPENAI_API_KEY=dummy \
-  uv run python inference.py
-```
-
-Run the baseline matrix (random + Open LLM reruns) and emit a JSON report:
-
-```bash
-API_BASE_URL=https://api.openai.com/v1 \
-MODEL_NAME=nvidia/Nemotron-3-Super-49B-v1 \
-OPENAI_API_KEY=your_token \
-uv run python scripts/run_baseline_matrix.py --random-runs 1 --llm-runs 3 --output-json baseline_nemotron_report.json
+API_BASE_URL=https://router.huggingface.co/v1 \
+MODEL_NAME=meta-llama/Llama-3.1-8B-Instruct \
+HF_TOKEN=your_token \
+python scripts/run_baseline_matrix.py --random-runs 1 --llm-runs 3 --output-json baseline_report.json
 ```
 
 Windows PowerShell shortcut:
 
 ```powershell
-$env:OPENAI_API_KEY="your_token"
+$env:HF_TOKEN="your_token"
 powershell -ExecutionPolicy Bypass -File scripts/run_nemotron_baseline.ps1 -RandomRuns 1 -LlmRuns 3
 ```
-
-| Task | Difficulty | Random Baseline Score |
-|---|---|---|
-| `single_incident` | Easy | ~0.30 |
-| `multi_incident` | Medium | ~0.70 |
-| `mass_casualty` | Hard | ~0.74 |
-| `shift_surge` | Hard | ~0.56 |
-
-*Scores above are from deterministic random-agent inference with `seed=42`.*
-*For Open LLM evaluation, use Nemotron 3 Super as the primary baseline and report mean/std across reruns.*
 
 ---
 
@@ -501,10 +483,10 @@ After starting the server and calling `/reset`, open `live_dashboard.html` in a 
 
 ```bash
 # Terminal 1: start server
-uv run python -m src.server.app
+python -m src.server.app
 
 # Terminal 2: reset to a task
-curl -X POST http://localhost:8000/reset \
+curl -X POST http://localhost:7860/reset \
   -H "Content-Type: application/json" \
   -d '{"task_id": "multi_incident"}'
 
@@ -538,6 +520,8 @@ asyncio.run(main())
 
 ---
 
+---
+
 ## Determinism
 
 All scenarios are deterministic under a fixed seed:
@@ -556,13 +540,13 @@ Incident positions include small seeded perturbations for realism; the overall e
 
 ```bash
 # Full test suite
-uv run pytest tests/ -v
+pytest tests/ -v
 
 # Individual modules
-uv run pytest tests/test_state_machine.py -v
-uv run pytest tests/test_rewards.py -v
-uv run pytest tests/test_openenv_integration.py -v
-uv run pytest tests/test_inference.py -v
+pytest tests/test_state_machine.py -v
+pytest tests/test_rewards.py -v
+pytest tests/test_openenv_integration.py -v
+pytest tests/test_inference.py -v
 ```
 
 ---
@@ -571,7 +555,7 @@ uv run pytest tests/test_inference.py -v
 
 ```bash
 # Full local validation (tests + inference + docker + benchmark scores)
-uv run python validate_local.py
+python validate_local.py
 
 # OpenEnv spec validation
 openenv validate

@@ -1,20 +1,41 @@
-name: citywide-dispatch-supervisor
-version: "0.1.0"
-description: >
-  City-wide 911 emergency dispatch supervisor RL environment.
-  An LLM agent learns to manage simultaneous incidents by dispatching
-  police, fire, and EMS units across a city grid under realistic constraints.
+name: "911-dispatch-supervisor"
+version: "1.0.0"
+description: "An RL environment simulating real-world 911 emergency dispatch operations. An LLM agent acts as a city-wide dispatch supervisor, allocating police, fire, and EMS units to simultaneous incidents under time pressure and resource constraints."
+
+tags:
+  - openenv
+  - dispatch
+  - emergency
+  - resource-allocation
+  - multi-objective
+
 entrypoint: src.openenv_environment:OpenEnvEnvironment
+
 tasks:
   - id: single_incident
-    name: Single Incident Response
-    description: One incident with a small unit pool; learn basic dispatch, correct unit type, and response time.
+    name: "Single Incident Response"
+    difficulty: easy
+    max_steps: 20
+    description: "Dispatch the correct unit to a single cardiac arrest in time."
+
   - id: multi_incident
-    name: Simultaneous Multi-Incident
-    description: Multiple concurrent incidents requiring triage, prioritization, and correct unit matching.
+    name: "Multi-Incident Triage"
+    difficulty: medium
+    max_steps: 40
+    description: "Manage 3 simultaneous incidents with competing priorities."
+
   - id: mass_casualty
-    name: Mass Casualty Event
-    description: Wave-based Priority-1 surge with resource conflict; maximize survival outcomes.
+    name: "Mass Casualty Event"
+    difficulty: hard
+    max_steps: 60
+    description: "Respond to a building collapse with incident waves across the city."
+
   - id: shift_surge
-    name: Shift Surge
-    description: Incident waves combined with units going out of service; maintain coverage over time.
+    name: "Shift Surge"
+    difficulty: hard
+    max_steps: 60
+    description: "Manage a surge of incidents as units go out of service mid-shift."
+
+action_space: "Structured JSON with dispatch_action (dispatch/cancel/reassign/stage/mutual_aid/upgrade/downgrade), unit_id, incident_id, and optional notes field."
+
+observation_space: "Structured JSON with city state, all unit statuses/positions/ETAs, all incident statuses/severities/assigned units, step count, and reward breakdown."

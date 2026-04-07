@@ -1,45 +1,73 @@
 """Competition inference script with exact stdout logging format."""
 
 import asyncio
+import json
 import os
 import random
 import sys
+import time
 from typing import Any
 
-import httpx
-from openai import AsyncOpenAI
+from openai import OpenAI
 
 from src.models import Action, DispatchAction
 from src.openenv_environment import OpenEnvEnvironment
 
+# ---------------------------------------------------------------------------
+# Action 2 — Canonical environment variable names + OpenAI client
+# ---------------------------------------------------------------------------
+# HuggingFace deprecated https://api-inference.huggingface.co/v1 (HTTP 410)
+API_BASE_URL = os.environ.get("API_BASE_URL", "https://router.huggingface.co/v1")
+MODEL_NAME   = os.environ.get("MODEL_NAME", "meta-llama/Llama-3.1-8B-Instruct")
+API_KEY      = os.environ.get("OPENAI_API_KEY") or os.environ.get("HF_TOKEN", "")
 
-def _validate_env_vars() -> None:
-    """Validate required environment variables are set."""
-    missing = []
-    for var in ("API_BASE_URL", "MODEL_NAME"):
-        if not os.environ.get(var):
-            missing.append(var)
-    if missing:
-        raise EnvironmentError(
-            f"Missing required environment variables: {', '.join(missing)}"
-        )
+# ---------------------------------------------------------------------------
+# Action 4 — Per-task max-steps (must match the environment fixtures)
+# ---------------------------------------------------------------------------
+TASK_MAX_STEPS: dict[str, int] = {
+    "single_incident": 20,
+    "multi_incident": 40,
+    "mass_casualty": 60,
+    "shift_surge": 60,
+}
 
-    use_random = os.environ.get("USE_RANDOM", "").lower() == "true"
-    if use_random:
-        return
+# ---------------------------------------------------------------------------
+# Action 1 — JSON structured logging helpers
+# ---------------------------------------------------------------------------
 
-    # Prefer OPENAI_API_KEY for hackathon compliance; keep HF_TOKEN for backwards compatibility.
-    if os.environ.get("OPENAI_API_KEY"):
-        return
-    if os.environ.get("HF_TOKEN"):
-        return
-    raise EnvironmentError("Missing required environment variable: OPENAI_API_KEY")
+def log_start(task: str, env: str, model: str):
+    print(json.dumps({
+        "type": "START",
+        "task": task,
+        "env": env,
+        "model": model
+    }), flush=True)
 
 
-def _get_env(var: str) -> str:
-    """Get environment variable value."""
-    return os.environ[var]
+def log_step(step: int, action, reward: float, done: bool, error=None):
+    print(json.dumps({
+        "type": "STEP",
+        "step": step,
+        "action": str(action),
+        "reward": reward,
+        "done": done,
+        "error": str(error) if error else None
+    }), flush=True)
 
+
+def log_end(success: bool, steps: int, score: float, rewards: list):
+    print(json.dumps({
+        "type": "END",
+        "success": success,
+        "steps": steps,
+        "score": score,
+        "rewards": rewards
+    }), flush=True)
+
+
+# ---------------------------------------------------------------------------
+# Agents
+# ---------------------------------------------------------------------------
 
 class RandomAgent:
     """Deterministic baseline agent that picks legal actions at random."""
@@ -56,7 +84,7 @@ class RandomAgent:
             legal_actions: List of valid actions for current state.
 
         Returns:
-            Selected Action, or None if no legal actions available (agent should wait).
+            Selected Action, or None if no legal actions available.
         """
         if not legal_actions:
             return None
@@ -64,64 +92,46 @@ class RandomAgent:
 
 
 class LLMAgent:
-    """LLM agent using OpenAI-compatible endpoint with dynamic auth."""
+    """LLM agent using OpenAI-compatible endpoint (sync client)."""
 
-    def __init__(self, api_key: str, base_url: str, model: str) -> None:
-        self.api_key = api_key
-        self.base_url = base_url.rstrip("/")
-        self.model = model
+    def __init__(self) -> None:
+        # Action 2 — single canonical OpenAI client
+        self.client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
         self._rng = random.Random(42)
 
-        # Official OpenAI Python client for OpenAI-compatible endpoints.
-        self._client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url)
-
-    async def chat(self, messages: list[dict]) -> str:
-        """Send chat request to LLM endpoint with appropriate auth.
-
-        Uses the official OpenAI client for OpenAI-compatible endpoints.
-
-        Note: Some non-OpenAI providers (e.g., certain Gemini endpoints) may not
-        be compatible with the OpenAI client; those are handled via a minimal
-        HTTPX fallback.
-        """
-        is_gemini = "gemini" in self.base_url.lower()
-        if is_gemini:
-            # Fallback for Gemini-style "?key=" auth.
-            headers = {"Content-Type": "application/json"}
-            url = f"{self.base_url}/chat/completions?key={self.api_key}"
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                resp = await client.post(
-                    url,
-                    json={"model": self.model, "messages": messages},
-                    headers=headers,
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                return data["choices"][0]["message"]["content"]
-
-        resp = await self._client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-        )
-        return resp.choices[0].message.content or ""
+    def _call_llm_sync(self, messages: list[dict]) -> str:
+        """Blocking LLM call — must be run in a thread to avoid blocking the event loop."""
+        try:
+            resp = self.client.chat.completions.create(
+                model=MODEL_NAME, messages=messages
+            )
+            return resp.choices[0].message.content or ""
+        except Exception:
+            return ""
 
     async def select_action(
         self, legal_actions: list[Action], state_desc: str, prev_obs: Any = None
     ) -> Action | None:
+        """Select an action via LLM (async — offloads blocking HTTP to a thread)."""
         if not legal_actions:
             return None
 
-        SYSTEM_PROMPT = """You are a 911 emergency dispatch supervisor for Metro City.
-You manage police, fire, and EMS units responding to simultaneous incidents.
-Your job is to dispatch the right unit to the right incident as fast as possible.
-Life-threatening (Priority 1) incidents must be responded to immediately.
-Always dispatch the correct unit type for each incident.
-Only call for mutual aid when all local units of the required type are busy.
+        SYSTEM_PROMPT = """You are an expert 911 dispatch supervisor for Metro City.
 
-Respond with ONLY the exact action string from the legal actions list. No explanation."""
+STRICT PRIORITY ORDER:
+1. P1 incidents (cardiac arrest, shooting, building collapse) = dispatch IMMEDIATELY. Any P1 death caps your score at 0.2.
+2. Match unit type exactly: MEDIC→medical emergencies, ENGINE/LADDER→fire, PATROL→crime/shooting, HAZMAT→hazmat.
+3. Never dispatch a unit already DISPATCHED or ON_SCENE.
+4. Use mutual_aid ONLY when ALL local units of the needed type are busy.
+5. Use stage to pre-position units near high-risk areas when no active incidents need them.
+
+SCORING WEIGHTS: response_time 30% | triage 25% | P1 survival 25% | coverage 12% | protocol 8%
+
+You will receive current state and a numbered list of legal actions.
+Respond with ONLY the exact action string. No explanation. No JSON. Just the string."""
 
         prev_info = ""
-        if prev_obs and prev_obs.issues:
+        if prev_obs and hasattr(prev_obs, "issues") and prev_obs.issues:
             prev_info = f"\nPrevious action issues: {', '.join(prev_obs.issues)}. Adapt your next action accordingly."
 
         action_strs = [f"- {_format_action(a)}" for a in legal_actions]
@@ -135,16 +145,26 @@ Respond with ONLY the exact action string from the legal actions list. No explan
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
         ]
-        response = await self.chat(messages)
+
+        # Run the blocking sync OpenAI call in a thread pool so it doesn't
+        # block the asyncio event loop (which owns env.reset / env.step).
+        response = await asyncio.to_thread(self._call_llm_sync, messages)
+
+        if not response:
+            return self._rng.choice(legal_actions)
 
         response_norm = response.strip().lower()
         for action in legal_actions:
             if _format_action(action).lower() == response_norm:
                 return action
 
-        # Fallback to random if LLM response doesn't match
+        # Fallback to random if LLM response doesn't match any legal action
         return self._rng.choice(legal_actions)
 
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def _format_action(action: Action) -> str:
     """Format dispatch action as a compact string for logging and LLM matching."""
@@ -178,163 +198,158 @@ def _format_state_for_llm(env: OpenEnvEnvironment) -> str:
     return " | ".join(parts)
 
 
+# ---------------------------------------------------------------------------
+# Episode runner
+# ---------------------------------------------------------------------------
+
 async def run_episode(
     task_id: str,
-    model_name: str,
     agent: RandomAgent | LLMAgent,
 ) -> tuple[bool, int, float, list[float]]:
     """Run a single episode for a task.
 
-    Args:
-        task_id: Task identifier (departure, arrival, integrated).
-        model_name: Model name for logging.
-        agent: Agent to use for action selection (RandomAgent or LLMAgent).
-
     Returns:
-        Tuple of (success, step_count, total_score, list_of_rewards).
+        Tuple of (success, step_count, score, list_of_rewards).
     """
-    print(f"[START] task={task_id} env=citywide-dispatch-supervisor model={model_name}")
+    # Action 4 — per-task max steps
+    max_steps = TASK_MAX_STEPS.get(task_id, 60)
+
+    # Action 3 — MAX_TOTAL_REWARD for score normalization
+    MAX_TOTAL_REWARD = max_steps * 1.0
+
+    # Action 1 — log_start before the episode loop
+    log_start(task=task_id, env="citywide-dispatch-supervisor", model=MODEL_NAME)
 
     env = OpenEnvEnvironment(task_id=task_id, seed=42)
     step_count = 0
     rewards: list[float] = []
     success = False
-    episode_score = 0.0
+    score = 0.0
 
     try:
         observation = await env.reset()
-        episode_score = float(observation.score)
         prev_obs = observation
 
-        while True:
+        while step_count < max_steps:
             step_count += 1
 
             legal_actions = env.legal_actions()
             state_desc = _format_state_for_llm(env)
 
+            # LLMAgent.select_action is async; RandomAgent's is sync — handle both
             if isinstance(agent, LLMAgent):
                 action = await agent.select_action(legal_actions, state_desc, prev_obs)
             else:
-                action = agent.select_action(legal_actions)
+                action = agent.select_action(legal_actions, state_desc, prev_obs)
 
             if action is None:
-                # No legal actions: either no incidents or no available units.
-                # End episode early; grader/benchmark expects output markers.
-                success = True
-                print(
-                    f"[STEP] step={step_count} action=NONE reward=0.00 done=true error=null"
-                )
+                # No legal actions — end episode
+                log_step(step=step_count, action="NONE", reward=0.0, done=True, error=None)
                 break
-            action_str = _format_action(action)
 
             try:
                 obs, reward, done = await env.step(action)
                 prev_obs = obs
                 rewards.append(reward)
-                episode_score = float(obs.score)
 
-                # Terminal conditions: done flag OR any protocol-invalid transition.
+                # Terminal conditions
                 has_illegal_transition = any(
                     ("illegal" in issue) for issue in (obs.issues or [])
                 )
 
-                # Terminal conditions: done flag OR terminal state OR illegal transition
                 if done or has_illegal_transition:
+                    err = "illegal_transition" if has_illegal_transition else None
                     if has_illegal_transition:
-                        error_str = "illegal_transition"
                         success = False
-                    else:
-                        error_str = "null"
-                        success = True
-                    reward_str = f"{reward:.2f}"
-                    print(
-                        f"[STEP] step={step_count} action={action_str} "
-                        f"reward={reward_str} done=true error={error_str}"
+                    log_step(
+                        step=step_count,
+                        action=_format_action(action),
+                        reward=reward,
+                        done=True,
+                        error=err,
                     )
                     break
 
-                # Format reward with exactly 2 decimal places
-                reward_str = f"{reward:.2f}"
-
-                # Format error - use null (not None)
-                error_str = "null"
-
-                print(
-                    f"[STEP] step={step_count} action={action_str} "
-                    f"reward={reward_str} done={str(done).lower()} error={error_str}"
+                # Normal step log
+                log_step(
+                    step=step_count,
+                    action=_format_action(action),
+                    reward=reward,
+                    done=False,
+                    error=None,
                 )
 
-                # Safety check for runaway episodes
-                if step_count >= 1000:
-                    print(
-                        f"[STEP] step={step_count} action={action_str} "
-                        f"reward={reward_str} done=true error=max_steps_exceeded"
-                    )
-                    success = False
-                    break
-
             except Exception as e:
-                print(
-                    f"[STEP] step={step_count} action={action_str} "
-                    f"reward=0.00 done=true error=step_error"
+                log_step(
+                    step=step_count,
+                    action=_format_action(action),
+                    reward=0.0,
+                    done=True,
+                    error=e,
                 )
                 success = False
                 break
 
-    except Exception as e:
+        # ------------------------------------------------------------------
+        # Action 3 — Score computation
+        # ------------------------------------------------------------------
+        score = sum(rewards) / MAX_TOTAL_REWARD if MAX_TOTAL_REWARD > 0 else 0.0
+        score = min(max(score, 0.0), 1.0)  # clamp to [0, 1]
+        success = score >= 0.5
+
+    except Exception:
+        score = 0.0
         success = False
     finally:
         env.close()
+        # Action 1 — log_end in the finally block
+        log_end(success=success, steps=step_count, score=round(score, 4), rewards=rewards)
 
-    # OpenEnv publishes episode score in observation.score; keep this for [END].
-    step_rewards = rewards
-    total_score = episode_score
-    total_score = max(0.0, min(1.0, total_score))
+    return success, step_count, score, rewards
 
-    # Format rewards list as comma-separated with 2 decimal places
-    rewards_str = ",".join(f"{r:.2f}" for r in step_rewards) if step_rewards else "0.00"
 
-    print(
-        f"[END] success={str(success).lower()} steps={step_count} "
-        f"score={total_score:.3f} rewards={rewards_str}"
-    )
-
-    return success, step_count, total_score, rewards
-
+# ---------------------------------------------------------------------------
+# Main — runs all 4 tasks sequentially (Action 4)
+# ---------------------------------------------------------------------------
 
 async def main() -> int:
     """Main entry point for inference script."""
-    try:
-        _validate_env_vars()
+    use_random = os.environ.get("USE_RANDOM", "").lower() == "true"
 
-        model_name = _get_env("MODEL_NAME")
-        api_base_url = _get_env("API_BASE_URL")
+    if use_random:
+        agent: RandomAgent | LLMAgent = RandomAgent(seed=42)
+    else:
+        if not API_KEY:
+            log_end(success=False, steps=0, score=0.0, rewards=[])
+            print("ERROR: Missing HF_TOKEN environment variable", file=sys.stderr)
+            return 1
+        agent = LLMAgent()
 
-        use_random = os.environ.get("USE_RANDOM", "").lower() == "true"
+    task_ids = ["single_incident", "multi_incident", "mass_casualty", "shift_surge"]
 
-        if use_random:
-            agent: RandomAgent | LLMAgent = RandomAgent(seed=42)
-        else:
-            api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("HF_TOKEN", "")
-            agent = LLMAgent(api_key=api_key, base_url=api_base_url, model=model_name)
+    # Action 4 — wall-clock timing per task
+    total_start = time.time()
 
-        task_ids = ["single_incident", "multi_incident", "mass_casualty", "shift_surge"]
+    for task_id in task_ids:
+        task_start = time.time()
+        await run_episode(task_id, agent)
+        task_elapsed = time.time() - task_start
+        print(
+            f"[TIMER] task={task_id} elapsed={task_elapsed:.1f}s",
+            file=sys.stderr,
+        )
 
-        for task_id in task_ids:
-            await run_episode(task_id, model_name, agent)
+    total_elapsed = time.time() - total_start
+    print(f"[TIMER] total_elapsed={total_elapsed:.1f}s", file=sys.stderr)
 
-        return 0
+    if total_elapsed > 900:  # 15-minute budget
+        print(
+            "[WARNING] Total inference time exceeded 15 minutes! "
+            "Consider reducing LLM retries or adding a sleep cap.",
+            file=sys.stderr,
+        )
 
-    except EnvironmentError as e:
-        # Emit [END] to stdout for failure case
-        print("[END] success=false steps=0 score=0.000 rewards=0.00")
-        print(f"ERROR: {e}", file=sys.stderr)
-        return 1
-    except Exception as e:
-        # Emit [END] to stdout for failure case
-        print("[END] success=false steps=0 score=0.000 rewards=0.00")
-        print(f"ERROR: Unexpected error: {e}", file=sys.stderr)
-        return 1
+    return 0
 
 
 if __name__ == "__main__":
