@@ -36,33 +36,19 @@ TASK_MAX_STEPS: dict[str, int] = {
 # ---------------------------------------------------------------------------
 
 def log_start(task: str, env: str, model: str):
-    print(json.dumps({
-        "type": "START",
-        "task": task,
-        "env": env,
-        "model": model
-    }), flush=True)
+    print(f"[START] task={task} env={env} model={model}", flush=True)
 
 
 def log_step(step: int, action, reward: float, done: bool, error=None):
-    print(json.dumps({
-        "type": "STEP",
-        "step": step,
-        "action": str(action),
-        "reward": reward,
-        "done": done,
-        "error": str(error) if error else None
-    }), flush=True)
+    done_str = "true" if done else "false"
+    err_str = "null" if error is None else str(error)
+    print(f"[STEP] step={step} action={action} reward={reward:.2f} done={done_str} error={err_str}", flush=True)
 
 
 def log_end(success: bool, steps: int, score: float, rewards: list):
-    print(json.dumps({
-        "type": "END",
-        "success": success,
-        "steps": steps,
-        "score": score,
-        "rewards": rewards
-    }), flush=True)
+    success_str = "true" if success else "false"
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    print(f"[END] success={success_str} steps={steps} score={score:.2f} rewards={rewards_str}", flush=True)
 
 
 # ---------------------------------------------------------------------------

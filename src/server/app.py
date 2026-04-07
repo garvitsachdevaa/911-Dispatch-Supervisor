@@ -157,7 +157,9 @@ async def list_tasks() -> list[dict[str, str]]:
 
 
 @app.post("/reset")
-async def reset(request: ResetRequest) -> dict[str, Any]:
+async def reset(request: ResetRequest | None = None) -> dict[str, Any]:
+    if request is None:
+        request = ResetRequest()
     global _env
     _env = OpenEnvEnvironment(task_id=request.task_id, seed=request.seed)
     obs = await _env.reset()

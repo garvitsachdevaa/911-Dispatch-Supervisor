@@ -36,13 +36,10 @@ class TestInferenceFormatCompliance:
         assert returncode == 0, f"inference.py failed: {stderr}"
         tasks_run = []
         for line in stdout.split("\n"):
-            if '"type": "START"' in line:
-                try:
-                    import json
-                    d = json.loads(line)
-                    tasks_run.append(d.get("task"))
-                except:
-                    pass
+            if line.startswith("[START]"):
+                match = re.match(r"\[START\] task=(\S+) env=(\S+) model=(\S+)", line)
+                assert match
+                tasks_run.append(match.group(1))
         assert tasks_run == self.TASK_IDS
 
     def test_start_line_format(self) -> None:
@@ -53,13 +50,10 @@ class TestInferenceFormatCompliance:
             "USE_RANDOM": "true",
         }
         _, stdout, _ = self._run_inference_capture(env)
+        pattern = r"\[START\] task=\S+ env=citywide-dispatch-supervisor model=\S+"
         for line in stdout.split("\n"):
-            if '"type": "START"' in line:
-                import json
-                d = json.loads(line)
-                assert d.get("task") in self.TASK_IDS
-                assert d.get("env") == "citywide-dispatch-supervisor"
-                assert d.get("model") == "test-model"
+            if line.startswith("[START]"):
+                assert re.match(pattern, line)
 
     def test_step_line_error_format(self) -> None:
         env = {
@@ -69,12 +63,13 @@ class TestInferenceFormatCompliance:
             "USE_RANDOM": "true",
         }
         _, stdout, _ = self._run_inference_capture(env)
-        valid_errors = {None, "max_steps_exceeded", "illegal_transition", "step_error"}
+        valid_errors = {"null", "max_steps_exceeded", "illegal_transition", "step_error"}
         for line in stdout.split("\n"):
-            if '"type": "STEP"' in line:
-                import json
-                d = json.loads(line)
-                assert d.get("error") in valid_errors or isinstance(d.get("error"), str)
+            if not line.startswith("[STEP]"):
+                continue
+            match = re.match(r"\[STEP\].+ error=(.+)", line)
+            assert match
+            assert match.group(1) in valid_errors
 
 
 class TestEnvVarValidation:
@@ -84,7 +79,6 @@ class TestEnvVarValidation:
         merged_env.update(env)
 
         # Ensure tests are not affected by host environment variables.
-        # If the test doesn't provide a required var, explicitly remove it.
         if "API_BASE_URL" not in env:
             merged_env.pop("API_BASE_URL", None)
         if "MODEL_NAME" not in env:
