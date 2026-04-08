@@ -1,3 +1,14 @@
+---
+title: 911 Dispatch Supervisor
+emoji: "🚨"
+colorFrom: red
+colorTo: gray
+sdk: docker
+app_port: 7860
+tags:
+  - openenv
+pinned: false
+---
 
 # 🚨 911 Dispatch Supervisor
 

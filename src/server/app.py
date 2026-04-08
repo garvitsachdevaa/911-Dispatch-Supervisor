@@ -41,6 +41,18 @@ async def runtime_error_handler(request, exc: RuntimeError):
     return JSONResponse(status_code=500, content={"detail": str(exc)})
 
 
+@app.get("/", include_in_schema=False)
+async def root() -> dict[str, Any]:
+    """Root endpoint for Spaces health probes and browser landing."""
+    return {
+        "status": "healthy",
+        "service": "citywide-dispatch-supervisor",
+        "health": "/health",
+        "tasks": "/tasks",
+        "dashboard_state": "/dashboard/state",
+    }
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
     # OpenEnv runtime validation expects status=healthy
