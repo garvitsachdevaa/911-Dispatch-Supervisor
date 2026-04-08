@@ -4,7 +4,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel
 
 from src.models import Action, Observation, State
@@ -42,15 +42,14 @@ async def runtime_error_handler(request, exc: RuntimeError):
 
 
 @app.get("/", include_in_schema=False)
-async def root() -> dict[str, Any]:
-    """Root endpoint for Spaces health probes and browser landing."""
-    return {
-        "status": "healthy",
-        "service": "citywide-dispatch-supervisor",
-        "health": "/health",
-        "tasks": "/tasks",
-        "dashboard_state": "/dashboard/state",
-    }
+async def root():
+    """Serve the live dashboard on the root route for HF Spaces."""
+    import os
+    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    dashboard_path = os.path.join(base_dir, "live_dashboard.html")
+    if os.path.exists(dashboard_path):
+        return FileResponse(dashboard_path)
+    return JSONResponse({"status": "healthy", "error": "dashboard not found"})
 
 
 @app.get("/health")
