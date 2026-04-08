@@ -23,6 +23,13 @@ class OpenEnvEnvironment:
         self._state.metadata["cumulative_reward"] = 0.0
         self._state.metadata["episode_rewards"] = []
         self._state.metadata["episode_score"] = 0.0
+        active_p1 = sum(
+            1
+            for i in self._state.incidents.values()
+            if i.severity.value == "PRIORITY_1" and i.status.value not in {"RESOLVED", "ESCALATED"}
+        )
+        avail = sum(1 for u in self._state.units.values() if u.status.value == "AVAILABLE")
+
         self._last_observation = Observation(
             result="dispatch center online",
             score=0.0,
@@ -36,6 +43,8 @@ class OpenEnvEnvironment:
                 "protocol": 1.0,
             },
             phraseology_score=1.0,
+            active_p1_count=active_p1,
+            units_available=avail,
         )
         return self._last_observation
 
