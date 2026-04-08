@@ -26,6 +26,7 @@ RUN pip install --no-cache-dir \
 COPY src/ /app/src/
 COPY data/ /app/data/
 COPY openenv.yaml /app/openenv.yaml
+COPY live_dashboard.html /app/live_dashboard.html
 
 # HuggingFace Spaces always routes to port 7860
 EXPOSE 7860
